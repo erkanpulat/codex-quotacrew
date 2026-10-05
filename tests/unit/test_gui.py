@@ -205,6 +205,46 @@ def test_account_refresh_keeps_rows_and_clears_loading_on_failure(window):
     assert view.loading.isHidden()
 
 
+def test_busy_account_refresh_preserves_rows_and_retries(window, monkeypatch):
+    from codex_account_manager.core.errors import OperationBusyError
+    from codex_account_manager.gui.i18n import tr
+    from codex_account_manager.gui.overview import QTimer
+
+    retries = []
+    monkeypatch.setattr(
+        QTimer, "singleShot", lambda delay, context, callback: retries.append(callback)
+    )
+    message = tr("Account operation in progress. Refresh will retry automatically.")
+    error = OperationBusyError("busy", stage="prepare")
+    for view, table, callback, status in (
+        (
+            window.dashboard,
+            window.dashboard.account_table,
+            window.dashboard._on_error,
+            window.dashboard.status,
+        ),
+        (
+            window.accounts_view,
+            window.accounts_view.table,
+            window.accounts_view._load_failed,
+            window.accounts_view.operation_status,
+        ),
+    ):
+        view._render(sample_profiles())
+        aliases = set(table.rows)
+        view.refresh()
+        view.set_loading("work", False)
+        callback(error)
+        assert set(table.rows) == aliases
+        assert status.text() == message
+        assert view.loading.isHidden()
+        retries.pop()()
+        assert not view.loading.isHidden()
+        view._render(sample_profiles())
+        assert status.text() != message
+    assert window.dashboard.alert.isHidden()
+
+
 def test_diagnostic_failure_clears_loading_and_allows_retry(window):
     view = window.diagnostics
     view.refresh()
@@ -705,6 +745,42 @@ def test_automatic_continuation_setting_and_status_are_visible(window):
         assert window.notice_text.text() == window.statusBar().currentMessage()
     finally:
         set_language("en")
+
+
+def test_dismissed_continuation_warning_stays_closed_until_state_changes(window):
+    from codex_account_manager.core.events import Event
+
+    payload = {"thread_id": "test-thread", "state": "needs_user", "stage": "verification"}
+    window._domain_event(Event("continuation.status", payload))
+    assert "could not be verified" in window.notice_text.text()
+    window._dismiss_notice()
+    window._domain_event(Event("continuation.status", payload))
+    assert window.notice.isHidden()
+    window._domain_event(Event("continuation.status", {**payload, "stage": "connection"}))
+    assert not window.notice.isHidden()
+    window._dismiss_notice()
+    window._domain_event(Event("continuation.status", {**payload, "state": "running"}))
+    window._domain_event(Event("continuation.status", payload))
+    assert not window.notice.isHidden()
+
+
+def test_transient_continuation_notice_expires_without_hiding_other_issues(window, monkeypatch):
+    from codex_account_manager.core.events import Event
+    from codex_account_manager.gui.main_window import QTimer
+
+    timers = []
+    monkeypatch.setattr(QTimer, "singleShot", lambda *args: timers.append(args))
+    transient = {"thread_id": "a", "state": "needs_user", "stage": "verification"}
+    window._domain_event(Event("continuation.status", transient))
+    expiry = next(args[-1] for args in timers if args[0] == 30000)
+    window._domain_event(Event("continuation.status", {"thread_id": "b", "state": "needs_user"}))
+    expiry()
+    assert not window.notice.isHidden()
+    assert window.notice_text.text() == window._continuation_issues["b"]
+    window._domain_event(Event("continuation.status", {"thread_id": "b", "state": "completed"}))
+    assert window.notice.isHidden()
+    window._domain_event(Event("continuation.status", transient))
+    assert window.notice.isHidden()
 
 
 def test_sidebar_tools_remain_selected_across_theme_and_nested_pages(window):
@@ -2040,3 +2116,39 @@ def test_cancelled_work_preparation_cannot_arm_a_plan(window, monkeypatch):
     callbacks.pop()(PowerTarget("work", "thread", None, "turn"))
     arm.assert_not_called()
     assert widget.schedule_button.isEnabled() == (os.name == "nt")
+
+
+@pytest.mark.parametrize("locale", ["tr", "en"])
+@pytest.mark.parametrize("next_year", [False, True])
+def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(app, locale, next_year):
+    from dataclasses import replace
+    from datetime import datetime
+
+    from codex_account_manager.gui.i18n import set_language
+    from codex_account_manager.gui.widgets import AccountRow
+
+    now = datetime.now().astimezone()
+    until = now.replace(year=now.year + int(next_year), month=12, day=31, hour=23, minute=59)
+    health = replace(
+        sample_profiles()[0],
+        plan_type="plus",
+        account_match=True,
+        subscription_until=until,
+        subscription_checked_at=now,
+        stale=False,
+    )
+    set_language(locale)
+    try:
+        card = AccountRow(health)
+        expected = "31.12" if locale == "tr" else "12/31"
+        if next_year:
+            expected += ("." if locale == "tr" else "/") + until.strftime("%y")
+        assert card._plan.text() == "Plus · " + expected
+        assert str(until.year) in card._plan.toolTip()
+        for changes in ({"stale": True}, {"account_match": False}, {"subscription_until": now}):
+            hidden = AccountRow(replace(health, **changes))
+            assert hidden._plan.text() == "Plus"
+            hidden.deleteLater()
+        card.deleteLater()
+    finally:
+        set_language("en")

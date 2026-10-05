@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         self._running_work = 0
         self._unverified_work = 0
         self._continuation_issues: dict[str, str] = {}
+        self._dismissed_continuation_issues: dict[str, str] = {}
         self._shared_waits: set[str] = set()
         self.runner.failed.connect(self._operation_failed)
         self._bridge = _EventBridge(self)
@@ -185,7 +186,7 @@ class MainWindow(QMainWindow):
         self.desktop_download.hide()
         notice_layout.addWidget(self.desktop_download)
         dismiss = QPushButton(tr("Close"))
-        dismiss.clicked.connect(self.notice.hide)
+        dismiss.clicked.connect(self._dismiss_notice)
         notice_layout.addWidget(dismiss)
         self.notice.hide()
         content_layout.addWidget(self.notice)
@@ -733,15 +734,33 @@ class MainWindow(QMainWindow):
         self.toast.raise_()
         self.toast_timer.start(4500)
 
+    def _dismiss_notice(self) -> None:
+        self._dismissed_continuation_issues.update(self._continuation_issues)
+        self._dismissed_continuation_issues[""] = self.notice_text.text()
+        self.notice.hide()
+
+    def _expire_continuation_notice(self, thread_id: str, message: str) -> None:
+        current = self._continuation_issues.get(thread_id) if thread_id else self.notice_text.text()
+        if current != message:
+            return
+        self._dismissed_continuation_issues[thread_id] = message
+        if not self._show_continuation_issues():
+            self.notice.hide()
+
     def _show_continuation_issues(self) -> bool:
-        if not self._continuation_issues:
+        visible = {
+            key: message
+            for key, message in self._continuation_issues.items()
+            if self._dismissed_continuation_issues.get(key) != message
+        }
+        if not visible:
             return False
         self.notice_text.setText(
-            next(iter(self._continuation_issues.values()))
-            if len(self._continuation_issues) == 1
+            next(iter(visible.values()))
+            if len(visible) == 1
             else tr(
                 "{count} conversations need attention. Other independent work can continue. See Jobs for details.",
-                count=len(self._continuation_issues),
+                count=len(visible),
             )
         )
         self.notice.show()
@@ -832,6 +851,21 @@ class MainWindow(QMainWindow):
                 "skipped": "Automatic continuation was skipped. See the work details.",
             }
             message = tr(messages.get(event.payload["state"], messages["needs_user"]))
+            transient_issue = event.payload.get("state") == "needs_user" and event.payload.get(
+                "stage"
+            ) in {
+                "verification",
+                "connection",
+                "recovery",
+                "owner_busy",
+                "checkpoint",
+                "preparation",
+                "journal",
+            }
+            if transient_issue:
+                message = tr(
+                    "Automatic continuation could not be verified. This does not mean your account quota is exhausted. See Jobs for details."
+                )
             if event.payload.get("stage"):
                 message += " " + continuation_detail(event.payload)
             self.statusBar().showMessage(message)
@@ -851,9 +885,25 @@ class MainWindow(QMainWindow):
                     self._continuation_issues[thread_id] = message
                 else:
                     self._continuation_issues.pop(thread_id, None)
+                    self._dismissed_continuation_issues.pop(thread_id, None)
+            elif not needs_attention:
+                self._dismissed_continuation_issues.pop("", None)
+            if (
+                transient_issue
+                and self._dismissed_continuation_issues.get(thread_id or "") != message
+            ):
+                QTimer.singleShot(
+                    30000,
+                    self,
+                    lambda key=thread_id or "", text=message: self._expire_continuation_notice(
+                        key, text
+                    ),
+                )
             if self._show_continuation_issues():
                 return
             if needs_attention:
+                if self._dismissed_continuation_issues.get(thread_id or "") == message:
+                    return
                 self.notice_text.setText(message)
                 self.notice.show()
             else:

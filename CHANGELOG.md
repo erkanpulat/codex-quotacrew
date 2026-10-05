@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3 — 2026-10-05
+
+- Show the recorded subscription period beside the plan when matching sign-in metadata is available, with localized dates and a last-checked tooltip; omit expired or mismatched metadata.
+- Recognize router discovery replies for conversations that are no longer open, preventing unrelated closed IDE conversations from blocking VS Code refresh after an account switch.
+- Preserve account health while another account operation holds the lock and retry UI refreshes when it becomes available.
+- Dismiss transient continuation notices after 30 seconds, retain explicit dismissal and distinguish verification delays from quota failures.
+
 ## 0.2.2 — 2026-10-03
 
 - Keep direct-download updates separate from packaged Windows installations and add an in-app bilingual privacy policy.

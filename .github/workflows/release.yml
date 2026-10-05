@@ -69,15 +69,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release download v0.2.1 --pattern 'QuotaCrew-Setup-0.2.1.exe' --pattern 'SHA256SUMS.txt' --dir build/previous-release
+          gh release download v0.2.2 --pattern 'QuotaCrew-Setup-0.2.2.exe' --pattern 'SHA256SUMS.txt' --dir build/previous-release
           if ($LASTEXITCODE -ne 0) { throw 'Previous release download failed' }
-          $previous = 'build/previous-release/QuotaCrew-Setup-0.2.1.exe'
+          $previous = 'build/previous-release/QuotaCrew-Setup-0.2.2.exe'
           $digest = (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant()
           $lines = Get-Content build/previous-release/SHA256SUMS.txt
-          if ($lines -notcontains "$digest  QuotaCrew-Setup-0.2.1.exe") { throw 'Previous installer checksum mismatch' }
+          if ($lines -notcontains "$digest  QuotaCrew-Setup-0.2.2.exe") { throw 'Previous installer checksum mismatch' }
       - run: python scripts/verify_windows_installer.py
         env:
-          QUOTACREW_PREVIOUS_INSTALLER: build/previous-release/QuotaCrew-Setup-0.2.1.exe
+          QUOTACREW_PREVIOUS_INSTALLER: build/previous-release/QuotaCrew-Setup-0.2.2.exe
       - name: Build portable archive
         shell: pwsh
         run: |

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.domain.states import QuotaState
 from codex_account_manager.gui.design import DARK, Palette, make_icon
-from codex_account_manager.gui.i18n import tr
+from codex_account_manager.gui.i18n import language, tr
 
 
 class ElidedLabel(QLabel):
@@ -258,11 +258,36 @@ class AccountRow(QFrame):
         self._name.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         name_row.addWidget(self._name)
         plan_text = (health.plan_type or tr("Unknown plan")).capitalize()
+        plan_tip = plan_text
+        until = health.subscription_until
+        if (
+            until is not None
+            and until.tzinfo is not None
+            and not health.stale
+            and health.account_match is True
+        ):
+            local = until.astimezone()
+            now = datetime.now().astimezone()
+            if local > now:
+                pattern = "%d.%m" if language() == "tr" else "%m/%d"
+                if local.year != now.year:
+                    pattern += ".%y" if language() == "tr" else "/%y"
+                plan_text += " · " + local.strftime(pattern)
+                full_pattern = "%d.%m.%Y" if language() == "tr" else "%m/%d/%Y"
+                plan_tip = tr(
+                    "Subscription period recorded at sign-in: {date}. Renewal or cancellation is not confirmed.",
+                    date=local.strftime(full_pattern),
+                )
+                if health.subscription_checked_at is not None:
+                    plan_tip += "\n" + tr(
+                        "Last checked: {date}",
+                        date=health.subscription_checked_at.astimezone().strftime(full_pattern),
+                    )
         self._plan = label(plan_text, "PlanBadge")
         self._plan.setFixedWidth(
-            min(76, max(44, self._plan.fontMetrics().horizontalAdvance(plan_text) + 16))
+            min(160, max(44, self._plan.fontMetrics().horizontalAdvance(plan_text) + 16))
         )
-        self._plan.setToolTip(plan_text)
+        self._plan.setToolTip(plan_tip)
         name_row.addWidget(self._plan)
         name_row.addStretch()
         identity.addLayout(name_row)

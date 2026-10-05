@@ -31,6 +31,7 @@ from codex_account_manager.core.child_process import (
 from codex_account_manager.core.errors import (
     AccountMismatchError,
     AppServerError,
+    OperationBusyError,
     ProfileNotFoundError,
     SignedOutError,
     SignInRequiredError,
@@ -245,6 +246,8 @@ class AccountService:
                         )
 
                 return list(await asyncio.gather(*(bounded(p) for p in profiles)))
+        except OperationBusyError:
+            raise
         except Exception as exc:
             return [self._failed_health(p, exc, active_account_id=None) for p in profiles]
 
@@ -284,6 +287,8 @@ class AccountService:
                 alias=profile.alias,
                 profile_id=profile.id,
                 plan_type=snapshot.plan_type,
+                subscription_until=snapshot.subscription_until if match is True else None,
+                subscription_checked_at=snapshot.subscription_checked_at if match is True else None,
                 email=snapshot.email if match is True else None,
                 reset_credits=snapshot.reset_credits if match is True else None,
                 primary_used_percent=snapshot.primary_used_percent,

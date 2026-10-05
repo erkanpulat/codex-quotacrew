@@ -154,7 +154,9 @@ class OwnerProtocol:
                 continue
             if (
                 method == "thread-owner-discovery"
-                and response.get("method") == method
+                # Router-generated discovery misses omit the method; requestId
+                # above still binds this response to our exact discovery request.
+                and response.get("method") in {None, method}
                 and response.get("resultType") == "error"
                 and response.get("error") == "no-client-found"
             ):

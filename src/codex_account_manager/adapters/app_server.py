@@ -13,6 +13,7 @@ from pathlib import Path
 from codex_account_manager import __version__
 from codex_account_manager.adapters.credential_store import ProfileAuthSession
 from codex_account_manager.adapters.interfaces import CapabilitySet, GoalInfo, ServerInfo
+from codex_account_manager.adapters.subscription import subscription_period
 from codex_account_manager.codex.runtime import codex_command, profile_environment
 from codex_account_manager.core.child_process import (
     ChildProcessLifetime,
@@ -413,11 +414,15 @@ class CodexAppServer:
             or account.get("id")
         )
 
+        plan = account.get("planType") or limits.get("planType")
+        period = subscription_period(self.codex_home, account_id, plan, account.get("email"))
         return AccountSnapshot(
             account_id=account_id,
             account_type=account.get("type"),
             email=_display_email(account.get("email")),
-            plan_type=account.get("planType") or limits.get("planType"),
+            plan_type=plan,
+            subscription_until=period[0] if period else None,
+            subscription_checked_at=period[1] if period else None,
             ordinary_usage_allowed=rate_result.get("ordinaryUsageAllowed"),
             primary_used_percent=primary.get("usedPercent"),
             primary_resets_at=primary.get("resetsAt"),

@@ -170,6 +170,8 @@ class Watcher:
                     else:
                         self.continuity._turn_baselines.clear()
                         await self.continuity.automation.stop()
+                except OperationBusyError:
+                    log.debug("Account refresh deferred until the current operation completes.")
                 except Exception:
                     log.exception("Watcher poll failed.")
                 try:

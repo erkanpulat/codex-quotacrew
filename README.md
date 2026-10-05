@@ -18,7 +18,7 @@ Windows · English / Türkçe · Light & dark themes · MIT
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/overview-light.png">
-  <img src="docs/images/overview-light.png" alt="QuotaCrew overview: accounts, remaining quotas and renewal times. Click to download.">
+  <img src="docs/images/overview-light.png" alt="QuotaCrew overview: accounts, remaining quotas and quota reset times. Click to download.">
 </picture>
 </a>
 
@@ -28,11 +28,13 @@ Windows · English / Türkçe · Light & dark themes · MIT
 
 When a usage limit interrupts a task, finding an available account and returning to the right conversation takes time. **QuotaCrew brings those steps together:** compare quotas, choose how accounts switch, and request continuation of eligible conversations in Codex Desktop or VS Code.
 
-- **See your accounts at a glance.** Five-hour and weekly capacity, renewal times, the active account and reset credits share one table.
+- **See your accounts at a glance.** Five-hour and weekly capacity, quota reset times, the active account and reset credits share one table.
 - **Choose how you switch.** Change accounts yourself, approve a suggestion or enable automatic switching to an available account when a limit is reached.
 - **Continue in the same conversation.** A continuation request carries the existing goal and instructions back to the interrupted conversation.
 - **Follow work and its results.** Jobs, Activity and the system tray show monitoring, continuation preferences and verified running-work counts.
 - **Fit your working routine.** Run in the tray, start with Windows or schedule shutdown when your chosen condition is met.
+
+The plan badge can also show the subscription-period date recorded at sign-in when matching metadata is available. Hover over it for the last check and source; this is not a confirmed renewal or cancellation date.
 
 ## Continuation flow
 
@@ -91,7 +93,7 @@ QuotaCrew does not install a VS Code extension. **Open project in editor** opens
 
 **Python included · No Node.js required · Existing Codex history preserved**
 
-1. **Download and open.** Get `QuotaCrew-Setup-0.2.1.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, extract the entire ZIP into a folder and open `QuotaCrew.exe`.
+1. **Download and open.** Get `QuotaCrew-Setup-0.2.3.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, extract the entire ZIP into a folder and open `QuotaCrew.exe`.
 2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
 3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open, then add your other accounts and refresh their quotas.
 
@@ -123,16 +125,16 @@ Search local conversations by project, source, title or folder and open the proj
 
 **Automatic shutdown** gives you three clear choices: finish a selected conversation, exhaust all saved accounts' available limits, or shut down after a set time. Work and limit conditions start a fixed **2-minute cancellation countdown** once verified and no other Codex work is active. The timer accepts **1–1440 minutes** (120 = two hours), including the final warning, and does not wait for work to finish. Plans require confirmation, last only for the current session and never forcibly close applications. [Shutdown conditions](docs/continuity.md#optional-windows-shutdown).
 
+![Automatic shutdown with three conditions, a duration picker and plan summary](docs/images/power-en.png)
+
 <details>
-<summary>Conversation history, account creation, reset credits and shutdown</summary>
+<summary>Conversation history, account creation and reset credits</summary>
 
 ![Local conversation history and project filters, in Turkish](docs/images/conversations-tr.png)
 
 ![Account creation dialog, in Turkish](docs/images/add-account-tr.png)
 
 ![Available reset-credit details, in Turkish](docs/images/reset-credits-tr.png)
-
-![Automatic shutdown conditions and countdown in minutes, in Turkish](docs/images/power-tr.png)
 
 Archived, cloud-only and other-device conversations are excluded from the local list. Reading a Codex goal and saving a local goal note do not start model work. Shutdown waits if fresh evidence is unavailable or other observed work is running; quitting cancels the plan.
 

@@ -242,6 +242,7 @@ async def test_confirmed_signed_out_shared_home_does_not_block_saved_accounts(
 
 
 async def test_health_cannot_race_with_switch_or_login(migrated_db):
+    from codex_account_manager.core.errors import OperationBusyError
     from codex_account_manager.core.operation_lock import OperationLock
 
     def unexpected(home):
@@ -250,8 +251,8 @@ async def test_health_cannot_race_with_switch_or_login(migrated_db):
     service = AccountService(app_server_factory=unexpected)
     await service.create_profile("work")
     with OperationLock(migrated_db.data_dir / "account-operation.lock"):
-        result = await service.all_health()
-    assert result[0].error and not result[0].reauth_required
+        with pytest.raises(OperationBusyError):
+            await service.all_health()
 
 
 async def test_same_home_reads_cannot_rotate_tokens_concurrently(migrated_db):

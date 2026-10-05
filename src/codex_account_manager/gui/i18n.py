@@ -58,6 +58,8 @@ EN = {
 }
 
 TR = {
+    "Subscription period recorded at sign-in: {date}. Renewal or cancellation is not confirmed.": "Giriş sırasında kaydedilen abonelik dönemi: {date}. Yenileme veya iptal durumu doğrulanmamıştır.",
+    "Last checked: {date}": "Son kontrol: {date}",
     "Loading conversations…": "Konuşmalar yükleniyor…",
     "Installation guide": "Kurulum rehberi",
     "Choose a condition, review your plan and confirm.": "Bir koşul seçin, planınızı kontrol edin ve onaylayın.",
@@ -261,6 +263,8 @@ TR = {
     "Continuation is pending. Install the update after it finishes.": "Devam işlemi bekliyor. İşlem tamamlandıktan sonra güncelleyin.",
     "The account database could not be verified.": "Hesap veritabanı doğrulanamadı.",
     "Another operation is in progress. Retry after it completes.": "Başka bir işlem sürüyor. Tamamlandıktan sonra tekrar deneyin.",
+    "Automatic continuation could not be verified. This does not mean your account quota is exhausted. See Jobs for details.": "Otomatik devam doğrulanamadı. Bu, hesap kotanızın dolduğu anlamına gelmez. Ayrıntılar için İşler bölümüne bakın.",
+    "Account operation in progress. Refresh will retry automatically.": "Hesap işlemi sürüyor. Bilgiler otomatik olarak yeniden kontrol edilecek.",
     "Account check timed out. Try refreshing again.": "Hesap kontrolü zaman aşımına uğradı. Yeniden yenilemeyi deneyin.",
     "Account switching is waiting because this conversation shares the Desktop process that must restart. Other independent work can continue.": "Bu konuşma, yeniden başlatılması gereken Desktop sürecini paylaştığı için hesap geçişi bekliyor. Diğer bağımsız işler devam edebilir.",
     "{count} conversations need attention. Other independent work can continue. See Jobs for details.": "{count} konuşma için müdahale gerekiyor. Diğer bağımsız işler devam edebilir. Ayrıntılar için İşler sayfasına bakın.",

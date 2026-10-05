@@ -28,6 +28,8 @@ Bir işin ortasında limit dolduğunda, hangi hesabın kullanılabilir olduğunu
 - **İşleri ve sonuçlarını takip edin.** İşler, Etkinlik ve sistem tepsisi; izleme durumunu, devam tercihlerini ve doğrulanmış çalışan iş sayısını gösterir.
 - **Çalışma düzeninizi seçin.** Tepside çalıştırın, Windows ile başlatın veya belirlediğiniz koşul gerçekleştiğinde bilgisayarın kapanmasını planlayın.
 
+Plan rozeti, eşleşen bilgi mevcutsa giriş sırasında kaydedilen abonelik dönemi tarihini de gösterir. Son kontrol ve kaynak açıklaması için üzerine gelin; bu tarih kesin yenileme veya iptal bilgisi değildir.
+
 ## Devam akışı
 
 İzleme ve ilgili devam seçeneği açıkken QuotaCrew, kota nedeniyle kesilen işi algılar ve kullanılabilir hesabı kontrol eder. Geçişin ardından **aynı konuşmaya** bir devam isteği gönderir; yeni turun durumunu takip ederek sonucu İşler sayfasında gösterir.
@@ -85,7 +87,7 @@ QuotaCrew bir VS Code eklentisi yüklemez. **Projeyi editörde aç** klasörü a
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve açın.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.2.1.exe` dosyasını indirip kurun. Taşınabilir kullanım için ZIP'in tamamını bir klasöre çıkarın ve `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve açın.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.2.3.exe` dosyasını indirip kurun. Taşınabilir kullanım için ZIP'in tamamını bir klasöre çıkarın ve `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın; ardından diğer hesaplarınızı ekleyip kotaları yenileyin.
 
@@ -117,16 +119,16 @@ Yerel konuşmalarınızı proje, kaynak, başlık veya klasöre göre arayın; i
 
 **Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların kullanılabilir limitleri dolduğunda veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
 
+![Üç koşul, süre seçimi ve plan özetiyle otomatik kapatma](docs/images/power-tr.png)
+
 <details>
-<summary>Konuşma geçmişi, hesap ekleme, sıfırlama hakları ve otomatik kapatma</summary>
+<summary>Konuşma geçmişi, hesap ekleme ve sıfırlama hakları</summary>
 
 ![Yerel konuşma geçmişi ve proje filtreleri](docs/images/conversations-tr.png)
 
 ![Hesap ekleme penceresi](docs/images/add-account-tr.png)
 
 ![Kullanılabilir sıfırlama hakkının ayrıntıları](docs/images/reset-credits-tr.png)
-
-![Otomatik kapatma koşulları ve dakika cinsinden geri sayım](docs/images/power-tr.png)
 
 Arşivlenmiş, yalnızca bulutta veya başka cihazda bulunan konuşmalar yerel listede gösterilmez. Codex hedefini okumak ve yerel hedef notu kaydetmek model çalıştırmaz. İş ve limit modlarında güncel durum doğrulanamıyorsa veya başka bir iş sürüyorsa kapatma bekler; uygulamadan çıkmak kapatma planını iptal eder.
 

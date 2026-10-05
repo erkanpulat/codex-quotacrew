@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from codex_account_manager.accounts.service import AccountService
+from codex_account_manager.core.errors import OperationBusyError
 from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.gui.account_table import AccountTable, account_sort_key
 from codex_account_manager.gui.async_runner import AsyncRunner
@@ -448,6 +449,14 @@ class DashboardView(BaseView):
         self.set_loading("accounts", False)
         self.refresh_btn.setEnabled(True)
         self._load_error = str(exc)
+        if isinstance(exc, OperationBusyError):
+            self._load_error = None
+            self.alert.hide()
+            self.status.setText(
+                tr("Account operation in progress. Refresh will retry automatically.")
+            )
+            QTimer.singleShot(2000, self, self.refresh)
+            return
         self.alert.setText(
             tr("Account usage could not be refreshed. Check your connection and try again.")
         )

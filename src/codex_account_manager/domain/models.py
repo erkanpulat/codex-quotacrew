@@ -63,6 +63,8 @@ class AccountSnapshot:
     secondary_window_minutes: int | None
     rate_limit_reached_type: str | None = None
     has_credits: bool | None = None
+    subscription_until: datetime | None = None
+    subscription_checked_at: datetime | None = None
     reset_credits: ResetCredits | None = None
 
 
@@ -84,6 +86,8 @@ class ProfileHealth:
     quota_state: QuotaState
     last_checked_at: datetime | None
     error: str | None = None
+    subscription_until: datetime | None = None
+    subscription_checked_at: datetime | None = None
     reset_credits: ResetCredits | None = None
     email: str | None = field(default=None, repr=False)
     stale: bool = False

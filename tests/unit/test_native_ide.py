@@ -136,6 +136,8 @@ def test_owner_send_inherits_settings_and_targets_exact_owner():
     "response_method,error",
     [
         ("thread-owner-discovery", "no-client-found"),
+        (None, "no-client-found"),
+        (None, "unavailable"),
         ("thread-owner-discovery", "unavailable"),
         ("unrelated", "no-client-found"),
     ],
@@ -146,13 +148,17 @@ def test_only_explicit_discovery_miss_is_safe_to_skip(response_method, error):
 
     def reply(message):
         original(message)
-        pipe.incoming[-1].update(method=response_method, resultType="error", error=error)
+        pipe.incoming[-1].update(resultType="error", error=error)
+        if response_method is None:
+            pipe.incoming[-1].pop("method")
+        else:
+            pipe.incoming[-1]["method"] = response_method
 
     pipe.send = reply
     with pytest.raises(AppServerError) as caught:
         OwnerProtocol(pipe).request("thread-owner-discovery", {}, 1)
     assert isinstance(caught.value, OwnerNotFoundError) == (
-        response_method == "thread-owner-discovery" and error == "no-client-found"
+        response_method in {None, "thread-owner-discovery"} and error == "no-client-found"
     )
 
 
@@ -185,7 +191,10 @@ async def test_ide_is_opt_in(migrated_db):
 
 
 @pytest.mark.parametrize("blocked", [False, True])
-async def test_ide_refresh_revalidates_new_owner_before_sending(migrated_db, tmp_path, blocked):
+@pytest.mark.parametrize("closed_chat", [False, True])
+async def test_ide_refresh_revalidates_new_owner_before_sending(
+    migrated_db, tmp_path, blocked, closed_chat
+):
     from dataclasses import replace
 
     from tests.integration.test_limit_continuation import _thread
@@ -198,9 +207,10 @@ async def test_ide_refresh_revalidates_new_owner_before_sending(migrated_db, tmp
         "status": "failed",
         "error": {"codexErrorInfo": "usageLimitExceeded"},
     }
-    server.list_threads = AsyncMock(
-        return_value=[replace(_thread("thread", 1), source="vscode", cwd=str(tmp_path))]
-    )
+    threads = [replace(_thread("thread", 1), source="vscode", cwd=str(tmp_path))]
+    if closed_chat:
+        threads.insert(0, replace(threads[0], id="closed"))
+    server.list_threads = AsyncMock(return_value=threads)
     server.is_desktop_thread = AsyncMock(return_value=False)
     supervisor = ContinuationSupervisor(factory=lambda: server)
     before = OwnerSnapshot("before", {"id": "last", "status": "failed"}, False, None)
@@ -208,7 +218,10 @@ async def test_ide_refresh_revalidates_new_owner_before_sending(migrated_db, tmp
     running = replace(after, turn={"id": "next", "status": "inProgress"}, blocked=True)
     supervisor.ide.wait_inspect = AsyncMock(side_effect=[before, after])
     supervisor.ide.inspect = AsyncMock(
-        side_effect=[replace(before, blocked=blocked), after, running]
+        side_effect=(
+            [OwnerNotFoundError("No local client owns this conversation.")] if closed_chat else []
+        )
+        + [replace(before, blocked=blocked), after, running]
     )
     supervisor.ide_session.needs_refresh = AsyncMock(return_value=True)
     supervisor.ide_session.refresh = AsyncMock()

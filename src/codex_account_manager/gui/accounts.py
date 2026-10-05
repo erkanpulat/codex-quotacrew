@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.continuity.policy import SwitchPolicy
+from codex_account_manager.core.errors import OperationBusyError
 from codex_account_manager.domain.models import Profile, ProfileHealth
 from codex_account_manager.gui.account_table import AccountTable, account_sort_key, display_health
 from codex_account_manager.gui.async_runner import AsyncRunner
@@ -122,6 +124,14 @@ class AccountsView(BaseView):
     def _load_failed(self, error: Exception) -> None:
         self._busy = False
         self.set_loading("accounts", False)
+        if isinstance(error, OperationBusyError):
+            if not self._login_busy:
+                self.operation_status.setText(
+                    tr("Account operation in progress. Refresh will retry automatically.")
+                )
+                self.operation_status.show()
+            QTimer.singleShot(2000, self, self.refresh)
+            return
         self.operation_status.setText(tr("Could not load accounts: {error}", error=error))
         self.operation_status.show()
 
