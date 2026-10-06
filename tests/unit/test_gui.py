@@ -286,6 +286,15 @@ def test_waiting_connection_notice_clears_after_confirmed_submission(window):
     assert window.notice.isHidden()
 
 
+def test_background_health_updates_both_account_pages(window):
+    from codex_account_manager.core.events import bus
+
+    profiles = sample_profiles()
+    bus.publish("health.updated", health=profiles, count=len(profiles))
+    assert set(window.accounts_view.table.rows) == {p.alias for p in profiles}
+    assert set(window.dashboard._account_rows) == {p.alias for p in profiles}
+
+
 def test_running_work_clears_its_previous_attention_notice(window):
     from codex_account_manager.core.events import bus
 
@@ -1678,12 +1687,12 @@ def test_account_list_sorts_names_without_selecting_a_row(window):
 def test_account_summary_and_filter_reflect_verified_availability(window):
     view = window.accounts_view
     view._render(sample_profiles())
-    assert view.total_value.text() == "4"
-    assert int(view.ready_value.text()) + int(view.attention_value.text()) == 4
+    assert view.summary.text() == window.dashboard.summary.text()
+    assert "4 accounts" in view.summary.text()
     assert not hasattr(view, "action_bar")
     view.status_filter.setCurrentIndex(view.status_filter.findData("ready"))
     shown = list(view.table.rows)
-    assert len(shown) == int(view.ready_value.text())
+    assert len(shown) == 3
     view.search.setText("no such account")
     assert not view.table.rows
 
@@ -1703,6 +1712,66 @@ def test_account_usage_sort_and_email_search(window):
     window.show()
     assert all(row._switch_btn.menu() for row in view.table.rows.values())
     assert not hasattr(view, "action_bar")
+
+
+def test_loading_never_moves_content_and_hidden_notice_reserves_no_space(window, app):
+    window.resize(1600, 940)
+    window.show()
+    app.processEvents()
+    view = window.dashboard
+    before = view.geometry()
+    table_before = view.account_table.geometry()
+    assert view.loading.height() == 4
+    assert not window.notice.sizePolicy().retainSizeWhenHidden()
+    for visible in (True, False, True, False):
+        view.set_loading("regression", visible)
+        app.processEvents()
+        assert view.geometry() == before
+        assert view.account_table.geometry() == table_before
+
+
+def test_subscription_sort_keeps_unknown_and_stale_accounts_last(window):
+    from dataclasses import replace
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    template = sample_profiles()[0]
+    profiles = [
+        replace(
+            template,
+            alias="Later",
+            profile_id="later",
+            subscription_until=now + timedelta(days=30),
+            stale=False,
+            error=None,
+            account_match=True,
+            auth_present=True,
+        ),
+        replace(
+            template,
+            alias="Soon",
+            profile_id="soon",
+            subscription_until=now + timedelta(days=2),
+            stale=False,
+            error=None,
+            account_match=True,
+            auth_present=True,
+        ),
+        replace(template, alias="Unknown", profile_id="unknown", subscription_until=None),
+        replace(
+            template,
+            alias="Stale",
+            profile_id="stale",
+            subscription_until=now + timedelta(days=1),
+            stale=True,
+        ),
+    ]
+    view = window.accounts_view
+    view._render(profiles)
+    view.sort_order.setCurrentIndex(view.sort_order.findData("subscription_soonest"))
+    assert list(view.table.rows)[:2] == ["Soon", "Later"]
+    view.sort_order.setCurrentIndex(view.sort_order.findData("subscription_latest"))
+    assert list(view.table.rows)[:2] == ["Later", "Soon"]
 
 
 def test_activity_filters_real_handoffs_and_reports_visible_count(window):
@@ -2152,3 +2221,23 @@ def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(app, 
         card.deleteLater()
     finally:
         set_language("en")
+
+
+def test_account_controls_match_and_privacy_hides_email_search(window):
+    view = window.accounts_view
+    view._render(sample_profiles())
+    dashboard = window.dashboard
+    assert view.summary.text() == dashboard.summary.text()
+    assert view.search.placeholderText() == dashboard.search.placeholderText()
+    for left, right in (
+        (view.status_filter, dashboard.account_filter),
+        (view.sort_order, dashboard.sort_order),
+    ):
+        assert [(left.itemText(i), left.itemData(i)) for i in range(left.count())] == [
+            (right.itemText(i), right.itemData(i)) for i in range(right.count())
+        ]
+    view.email_toggle.setChecked(True)
+    view.search.setText("studio@example.com")
+    assert not view.table.rows
+    view.email_toggle.setChecked(False)
+    assert list(view.table.rows) == ["Studio"]

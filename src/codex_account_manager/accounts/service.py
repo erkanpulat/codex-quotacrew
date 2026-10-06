@@ -183,7 +183,7 @@ class AccountService:
         return snapshot.account_id
 
     async def read_snapshot(
-        self, codex_home: str | Path, *, allow_refresh: bool = True
+        self, codex_home: str | Path, *, allow_refresh: bool = True, force_refresh: bool = False
     ) -> AccountSnapshot:
         home_key = str(Path(codex_home).resolve()).casefold()
         digest = sha256(home_key.encode()).hexdigest()[:24]
@@ -195,6 +195,8 @@ class AccountService:
                 try:
                     async with asyncio.timeout(ACCOUNT_READ_TIMEOUT):
                         await adapter.start()
+                        if force_refresh and isinstance(adapter, CodexAppServer):
+                            return await adapter.read_account(force_refresh=True)
                         return await adapter.read_account()
                 except TimeoutError as exc:
                     raise AppServerError("Account check timed out. Try refreshing again.") from exc
@@ -229,6 +231,7 @@ class AccountService:
                     if not active.account_id and self.credentials.active_auth_path.exists():
                         raise AppServerError("The active account identity is unavailable.")
                 except SignedOutError:
+                    allow_refresh = not self.credentials.active_auth_path.exists()
                     active = None
                 except Exception:
                     allow_refresh = not self.credentials.active_auth_path.exists()

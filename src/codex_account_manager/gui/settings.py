@@ -227,6 +227,7 @@ class SettingsView(BaseView):
         from codex_account_manager.gui.cli_setup import CliSetup
 
         self.cli = CliSetup(runner)
+        general_layout.addSpacing(12)
         general_layout.addWidget(self.cli)
         from codex_account_manager.gui.desktop_setup import DesktopSetup, IDESetup
 

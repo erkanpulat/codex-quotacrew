@@ -30,6 +30,103 @@ async def test_successful_switch_commits(tmp_paths):
     assert store.read_active() == b'{"account":"new"}'
 
 
+async def test_revoked_target_is_rejected_before_stopping_desktop(tmp_paths, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.accounts.service import AccountService
+    from codex_account_manager.core.errors import SignInRequiredError
+
+    store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
+    store.write_active_atomic(b"original")
+    profile = _profile(tmp_paths)
+    desktop = FakeDesktop()
+    read = AsyncMock(side_effect=SignInRequiredError("refresh_token_invalidated"))
+    monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value="other"))
+    monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[]))
+    monkeypatch.setattr(AccountService, "read_snapshot", read)
+    tx = AuthTransaction(credential_store=store, desktop=desktop)
+    with pytest.raises(SignInRequiredError):
+        await tx.switch(profile)
+    assert desktop.stopped == 0
+    assert store.read_active() == b"original"
+    assert read.await_args.kwargs == {"force_refresh": True}
+
+
+async def test_active_target_is_checked_in_shared_home_without_refreshing_a_copy(
+    tmp_paths, monkeypatch
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.accounts.service import AccountService
+
+    store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
+    auth = b'{"tokens":{"account_id":"acc-1"}}'
+    store.write_active_atomic(auth)
+    profile = _profile(tmp_paths)
+    read = AsyncMock(return_value=SimpleNamespace(account_id="acc-1"))
+    monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value="acc-1"))
+    monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[profile]))
+    monkeypatch.setattr(AccountService, "read_snapshot", read)
+
+    assert (
+        await AuthTransaction(credential_store=store, desktop=FakeDesktop()).switch(profile)
+    ).success
+    assert all(call.args[0] == store.shared_home for call in read.await_args_list)
+    assert all(call.kwargs == {"force_refresh": False} for call in read.await_args_list)
+    assert store.read_profile(profile.codex_home) == auth
+
+
+@pytest.mark.parametrize("target_fails", [False, True])
+async def test_source_rotation_during_shutdown_is_saved_to_its_own_profile(
+    tmp_paths, monkeypatch, target_fails
+):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.accounts.service import AccountService
+
+    store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
+    original = b'{"tokens":{"account_id":"source-id"},"generation":1}'
+    final = b'{"tokens":{"account_id":"source-id"},"generation":2}'
+    store.write_active_atomic(original)
+    target = _profile(tmp_paths)
+    source_home = tmp_paths.profiles_dir / "source"
+    source_home.mkdir()
+    (source_home / "auth.json").write_bytes(original)
+    source = Profile(
+        id="source", alias="source", codex_home=str(source_home), bound_account_id="source-id"
+    )
+
+    class RotatingDesktop(FakeDesktop):
+        def stop(self):
+            super().stop()
+            store.write_active_atomic(final)
+
+    async def snapshot(_self, home, **kwargs):
+        source_active = store.read_active() == final
+        if target_fails and Path(home) == store.shared_home and not source_active:
+            raise RuntimeError("Target validation failed")
+        identity = "source-id" if Path(home) == store.shared_home and source_active else "acc-1"
+        return SimpleNamespace(account_id=identity)
+
+    monkeypatch.setattr(
+        AccountService, "_active_account_id_safe", AsyncMock(return_value="source-id")
+    )
+    monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[source, target]))
+    monkeypatch.setattr(AccountService, "read_snapshot", snapshot)
+    tx = AuthTransaction(credential_store=store, desktop=RotatingDesktop())
+    if target_fails:
+        with pytest.raises(TransactionError):
+            await tx.switch(target)
+        assert store.read_active() == final
+    else:
+        assert (await tx.switch(target)).success
+        assert store.read_active() == b'{"account":"new"}'
+    assert store.read_profile(source.codex_home) == final
+
+
 async def test_account_mismatch_rolls_back(tmp_paths):
     store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
     store.write_active_atomic(b'{"account":"old"}')

@@ -11,6 +11,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from codex_account_manager.adapters.credential_store import FileCredentialStore
 from codex_account_manager.codex.runtime import codex_command, find_codex
 from codex_account_manager.core.errors import CodexNotFoundError
 from codex_account_manager.core.paths import paths
@@ -72,7 +73,7 @@ async def run_diagnostics() -> list[CheckResult]:
     try:
         profiles = await ProfileRepository().list()
         for p in profiles:
-            auth_present = (paths.profiles_dir / p.id / "auth.json").exists()
+            auth_present = FileCredentialStore().profile_auth_path(p.codex_home).is_file()
             bound = p.bound_account_id is not None
             results.append(
                 CheckResult(

@@ -357,15 +357,33 @@ class CodexAppServer:
         except (ValidationError, TypeError, AttributeError):
             return None
 
-    async def read_account(self) -> AccountSnapshot:
+    async def read_account(self, *, force_refresh: bool = False) -> AccountSnapshot:
+        if force_refresh and not self.refresh_on_unauthorized:
+            raise AppServerError("Forced refresh requires an isolated account profile.")
+        refreshed = force_refresh
         try:
-            account_result = await self._request("account/read", {"refreshToken": False})
+            account_result = await self._request("account/read", {"refreshToken": force_refresh})
         except AppServerError as exc:
             if _requires_sign_in(exc):
                 raise SignInRequiredError(
                     "Codex rejected this sign-in. Sign in again in Accounts."
                 ) from exc
-            raise
+            if not self.refresh_on_unauthorized or not re.search(r"\b401\b", str(exc)):
+                raise
+            if refreshed:
+                raise SignInRequiredError(
+                    "Codex rejected this sign-in. Sign in again in Accounts."
+                ) from exc
+            # Discovery can return 401 before the quota request.
+            refreshed = True
+            try:
+                account_result = await self._request("account/read", {"refreshToken": True})
+            except AppServerError as retry_error:
+                if _requires_sign_in(retry_error) or re.search(r"\b401\b", str(retry_error)):
+                    raise SignInRequiredError(
+                        "Codex rejected this sign-in. Sign in again in Accounts."
+                    ) from retry_error
+                raise
         if "account" not in account_result:
             raise AppServerError("Codex returned an invalid account response.")
         if account_result["account"] is None:
@@ -381,6 +399,10 @@ class CodexAppServer:
                 ) from exc
             if not self.refresh_on_unauthorized or not re.search(r"\b401\b", str(exc)):
                 raise
+            if refreshed:
+                raise SignInRequiredError(
+                    "Codex rejected this sign-in. Sign in again in Accounts."
+                ) from exc
             # Let Codex own OAuth rotation; retry only once, never for network/429 errors.
             try:
                 account_result = await self._request("account/read", {"refreshToken": True})
@@ -745,6 +767,7 @@ def _requires_sign_in(error: Exception) -> bool:
         for code in (
             "refresh_token_expired",
             "refresh_token_revoked",
+            "refresh_token_invalidated",
             "refresh_token_reused",
             "invalid_grant",
         )

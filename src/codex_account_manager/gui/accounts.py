@@ -6,20 +6,22 @@ import time
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
     QToolButton,
-    QWidget,
 )
 
 from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.continuity.policy import SwitchPolicy
 from codex_account_manager.core.errors import OperationBusyError
 from codex_account_manager.domain.models import Profile, ProfileHealth
-from codex_account_manager.gui.account_table import AccountTable, account_sort_key, display_health
+from codex_account_manager.gui.account_table import (
+    AccountControls,
+    AccountTable,
+    account_sort_key,
+    display_health,
+)
 from codex_account_manager.gui.async_runner import AsyncRunner
 from codex_account_manager.gui.design import DARK, set_button_icon
 from codex_account_manager.gui.dialogs import prompt_text
@@ -29,11 +31,10 @@ from codex_account_manager.gui.i18n import (
 from codex_account_manager.gui.view_base import (
     BaseView,
     EmptyState,
-    metric_card,
     page_panel,
     view_header,
 )
-from codex_account_manager.gui.widgets import ComboBox, label
+from codex_account_manager.gui.widgets import label
 
 
 class AccountsView(BaseView):
@@ -62,16 +63,8 @@ class AccountsView(BaseView):
                 add,
             )
         )
-        summary = QHBoxLayout()
-        summary.setSpacing(24)
-        self.total_card, self.total_value = metric_card(tr("Total accounts"))
-        self.ready_card, self.ready_value = metric_card(tr("Available accounts"))
-        self.attention_card, self.attention_value = metric_card(tr("Accounts needing attention"))
-        for card in (self.total_card, self.ready_card, self.attention_card):
-            summary.addWidget(card, 0)
-        summary.addStretch()
-        self._root.addLayout(summary)
         panel, panel_layout = page_panel()
+        panel.setObjectName("AccountsPanel")
         self._root.addWidget(panel, 1)
 
         self.guide = EmptyState(
@@ -84,25 +77,17 @@ class AccountsView(BaseView):
         )
         self.guide.hide()
         panel_layout.addWidget(self.guide)
-        self.filters_host = QWidget()
-        filters = QHBoxLayout(self.filters_host)
-        filters.setContentsMargins(0, 0, 0, 0)
-        filters.setSpacing(12)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText(tr("Search accounts…"))
-        self.search.textChanged.connect(self._filter)
-        filters.addWidget(self.search, 1)
-        self.status_filter = ComboBox()
-        for text, value in (
-            ("All accounts", "all"),
-            ("Available accounts", "ready"),
-            ("Accounts needing attention", "attention"),
-        ):
-            self.status_filter.addItem(tr(text), value)
-        self.status_filter.currentIndexChanged.connect(self._filter)
-        filters.addWidget(self.status_filter)
-        panel_layout.addWidget(self.filters_host)
-        self.filters_host.hide()
+        self.controls = AccountControls(palette)
+        self.filters_host = self.controls
+        self.search = self.controls.search
+        self.status_filter = self.controls.account_filter
+        self.sort_order = self.controls.sort_order
+        self.sort_order.setCurrentIndex(self.sort_order.findData(self._sort_mode))
+        self.email_toggle = self.controls.email_toggle
+        self.summary = self.controls.summary
+        self.controls.changed.connect(self._sort_changed)
+        panel_layout.addWidget(self.controls)
+        self.controls.hide()
         self.table = AccountTable(palette)
         self.table.sort_requested.connect(self._sort_column)
         self.table.set_sort(self._sort_mode)
@@ -146,18 +131,15 @@ class AccountsView(BaseView):
         self.guide.setVisible(not profiles)
         self.filters_host.setVisible(bool(profiles))
         self.table.setVisible(bool(profiles))
-        self.total_value.setText(str(len(profiles)))
-        ready = sum(
-            SwitchPolicy._is_available(profile)
-            for profile in profiles
-            if isinstance(profile, ProfileHealth)
-        )
-        self.ready_value.setText(str(ready))
-        self.attention_value.setText(str(len(profiles) - ready))
+        self.controls.set_summary([display_health(profile) for profile in profiles])
         self._filter()
 
     def _sort_column(self, modes: tuple[str, str]) -> None:
         self._sort_mode = modes[1] if self._sort_mode == modes[0] else modes[0]
+        self.sort_order.setCurrentIndex(self.sort_order.findData(self._sort_mode))
+
+    def _sort_changed(self) -> None:
+        self._sort_mode = self.sort_order.currentData()
         self._filter()
 
     def _filter(self, *_args) -> None:
@@ -172,6 +154,7 @@ class AccountsView(BaseView):
                 or (
                     isinstance(profile, ProfileHealth)
                     and profile.account_match is True
+                    and not self.email_toggle.isChecked()
                     and query in (profile.email or "").casefold()
                 )
             )
@@ -181,6 +164,12 @@ class AccountsView(BaseView):
                     mode == "ready"
                     and isinstance(profile, ProfileHealth)
                     and SwitchPolicy._is_available(profile)
+                )
+                or (
+                    mode == "credits"
+                    and isinstance(profile, ProfileHealth)
+                    and profile.reset_credits is not None
+                    and profile.reset_credits.available_count > 0
                 )
                 or (
                     mode == "attention"
@@ -205,7 +194,7 @@ class AccountsView(BaseView):
             return
         self.table.set_profiles(
             ordered,
-            email_visible=True,
+            email_visible=not self.email_toggle.isChecked(),
             menu_factory=self._profile_menu,
         )
         self._menu_buttons = [row._switch_btn for row in self.table.rows.values()]
@@ -259,7 +248,9 @@ class AccountsView(BaseView):
             self._login_busy = True
             self._set_actions_enabled(False)
             self.operation_status.setText(
-                tr("Waiting for Codex sign-in… Complete the sign-in flow in the window that opens.")
+                tr(
+                    "Complete sign-in in your browser. You can copy the sign-in link from the terminal and open it in another browser. Keep the terminal open until QuotaCrew confirms the account was added."
+                )
             )
             self.operation_status.show()
             self.runner.submit(

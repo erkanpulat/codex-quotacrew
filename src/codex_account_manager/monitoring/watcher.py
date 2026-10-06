@@ -57,7 +57,9 @@ class Watcher:
         else:
             signal()
 
-    async def poll_once(self, *, allow_switch: bool = True) -> list[ProfileHealth]:
+    async def poll_once(
+        self, *, allow_switch: bool = True, track_work: bool = True
+    ) -> list[ProfileHealth]:
         """One structured poll. Returns health for all profiles."""
         if self._load_policy:
             from codex_account_manager.storage.repositories import SettingsRepository
@@ -70,16 +72,17 @@ class Watcher:
                 self.policy = resolve_policy(value or DEFAULT_POLICY)
             except ValueError:
                 self.policy = resolve_policy(SwitchPolicyKind.MANUAL)
-        account_id = None
-        observed = False
-        try:
-            account_id = await self.continuity.observe_work()
-            observed = True
-            bus.publish("work.observed")
-        except Exception:
-            log.warning("Conversation tracking could not be refreshed.")
         health = await self.accounts.all_health()
         bus.publish("health.updated", count=len(health), health=health)
+        account_id = None
+        observed = False
+        if track_work:
+            try:
+                account_id = await self.continuity.observe_work()
+                observed = True
+                bus.publish("work.observed")
+            except Exception:
+                log.warning("Conversation tracking could not be refreshed.")
         if allow_switch:
             if observed:
                 try:
@@ -157,6 +160,7 @@ class Watcher:
         try:
             while not self._stop.is_set():
                 self._wake.clear()
+                started = time.monotonic()
                 enabled = False
                 try:
                     from codex_account_manager.storage.repositories import SettingsRepository
@@ -165,18 +169,18 @@ class Watcher:
                     bus.publish("monitor.status", enabled=enabled)
                     requested = self._manual_refresh
                     self._manual_refresh = False
-                    if enabled or requested:
-                        await self.poll_once(allow_switch=enabled)
-                    else:
+                    if not enabled:
                         self.continuity._turn_baselines.clear()
                         await self.continuity.automation.stop()
+                    await self.poll_once(allow_switch=enabled, track_work=enabled or requested)
                 except OperationBusyError:
                     log.debug("Account refresh deferred until the current operation completes.")
                 except Exception:
                     log.exception("Watcher poll failed.")
                 try:
                     await asyncio.wait_for(
-                        self._wake.wait(), timeout=self.poll_seconds if enabled else None
+                        self._wake.wait(),
+                        timeout=max(1.0, self.poll_seconds - (time.monotonic() - started)),
                     )
                 except TimeoutError:
                     pass

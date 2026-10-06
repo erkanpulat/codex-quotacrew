@@ -11,6 +11,7 @@ account. Users are responsible for complying with all applicable terms of servic
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
@@ -657,6 +658,11 @@ class ContinuationSupervisor:
                             )
                             bus.publish("work.observed")
                         if turn.get("status") in {"failed", "interrupted"}:
+                            error = turn.get("error")
+                            if isinstance(error, dict) and re.search(
+                                r"\b401\b", str(error.get("message", ""))
+                            ):
+                                stage = "authentication"
                             raise AppServerError(
                                 "The submitted continuation did not remain active."
                             )
@@ -683,6 +689,8 @@ class ContinuationSupervisor:
         except Exception as exc:
             if claimed:
                 await self._record(ticket, "uncertain")
+            if isinstance(exc, AppServerError) and re.search(r"\b401\b", str(exc)):
+                stage = "authentication"
             log.warning(
                 "Native continuation stopped (stage=%s, error=%s).", stage, type(exc).__name__
             )

@@ -159,7 +159,8 @@ class ContinuityService:
                 key=lambda i: i.recency_at or i.updated_at or 0,
                 reverse=True,
             )
-            tracked = await self.tracker.ids(account_id)
+            # Recheck work tracked before the account switch too.
+            tracked = await self.tracker.ids()
             selected = list(dict.fromkeys([*tracked, *(i.id for i in candidates[:20])]))
             sources = {i.id: i.source for i in candidates}
             for thread_id in tracked:

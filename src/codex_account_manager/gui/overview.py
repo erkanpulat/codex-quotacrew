@@ -10,26 +10,23 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QMenu,
     QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
-    QWidget,
 )
 
 from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.core.errors import OperationBusyError
 from codex_account_manager.domain.models import ProfileHealth
-from codex_account_manager.gui.account_table import AccountTable, account_sort_key
+from codex_account_manager.gui.account_table import AccountControls, AccountTable, account_sort_key
 from codex_account_manager.gui.async_runner import AsyncRunner
 from codex_account_manager.gui.design import DARK, make_icon, set_button_icon
 from codex_account_manager.gui.i18n import (
     tr,
 )
 from codex_account_manager.gui.view_base import BaseView, EmptyState, view_header
-from codex_account_manager.gui.widgets import AccountRow, ComboBox, CompactSwitch, label
+from codex_account_manager.gui.widgets import AccountRow, label
 
 
 class DashboardView(BaseView):
@@ -66,15 +63,13 @@ class DashboardView(BaseView):
         )
         header.setMaximumHeight(100)
         self._root.addWidget(header)
-        self.summary = label("", "Muted")
-        self.summary.setWordWrap(True)
         self.alert = label("", "InlineWarning")
         self.alert.setWordWrap(True)
         self.alert.hide()
         self._root.addWidget(self.alert)
         self._switch_mode = "manual"
         self._monitoring = False
-        self.mode_label = label(tr("Account and work checks paused"), "FieldTitle")
+        self.mode_label = label(tr("Automatic switching paused"), "FieldTitle")
         self.mode_label.setWordWrap(True)
         self.mode_strip = QFrame()
         mode_layout = QVBoxLayout(self.mode_strip)
@@ -91,22 +86,22 @@ class DashboardView(BaseView):
         self.mode_detail.setWordWrap(True)
         mode_layout.addWidget(self.mode_detail)
         self._root.addWidget(self.mode_strip)
-        self.hero = QFrame()
-        hero_box = QHBoxLayout(self.hero)
-        hero_box.setContentsMargins(0, 0, 0, 0)
-        hero_box.setSpacing(12)
-        hero_box.addWidget(label(tr("Accounts"), "H2"))
-        hero_box.addWidget(self.summary, 1)
-        hero_box.addWidget(label(tr("Hide email addresses"), "Caption"))
-        self.email_toggle = CompactSwitch(tr("Hide email addresses"))
-        self.email_toggle.setObjectName("PrivacySwitch")
-        self.email_toggle.setAccessibleName(tr("Hide email addresses"))
-        self.email_toggle.toggled.connect(self._privacy_changed)
-        hero_box.addWidget(self.email_toggle)
+        self.controls = AccountControls(palette)
+        self.summary = self.controls.summary
+        self.hero = self.controls.hero
+        self.email_toggle = self.controls.email_toggle
+        self.toolbar_host = self.controls.toolbar_host
+        self.search = self.controls.search
+        self.account_filter = self.controls.account_filter
+        self.sort_order = self.controls.sort_order
+        self.sort_button = self.controls.sort_button
+        self._sort_chosen = False
+        self.controls.changed.connect(self._filter)
+        self.sort_order.currentIndexChanged.connect(self._sort_changed)
         manage = QPushButton(tr("Manage profiles"))
         set_button_icon(manage, "settings", self.palette_.muted, 18)
         manage.clicked.connect(self.manage_requested.emit)
-        hero_box.addWidget(manage)
+        self.controls.heading_layout.addWidget(manage)
         self.work_panel = QFrame()
         self.work_panel.setObjectName("Panel")
         self.work_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -139,68 +134,7 @@ class DashboardView(BaseView):
         accounts_layout = QVBoxLayout(self.accounts_panel)
         accounts_layout.setContentsMargins(20, 18, 20, 18)
         accounts_layout.setSpacing(16)
-        accounts_layout.addWidget(self.hero)
-        self.toolbar_host = QWidget()
-        toolbar = QHBoxLayout(self.toolbar_host)
-        toolbar.setContentsMargins(0, 0, 0, 0)
-        toolbar.setSpacing(10)
-        self.search = QLineEdit()
-        self.search.setObjectName("AccountSearch")
-        self.search.setPlaceholderText(tr("Search by account name or email…"))
-        self.search.addAction(
-            make_icon("diagnostics", self.palette_.muted, 19),
-            QLineEdit.ActionPosition.LeadingPosition,
-        )
-        self.search.setAccessibleName(tr("Filter profiles"))
-        self.search.setMinimumWidth(120)
-        self.search.textChanged.connect(self._filter)
-        toolbar.addWidget(self.search, 1)
-        self.account_filter = ComboBox()
-        self.account_filter.setAccessibleName(tr("Filter accounts by availability"))
-        for title, value in (
-            ("All accounts", "all"),
-            ("Ready to use", "ready"),
-            ("Has reset credits", "credits"),
-            ("Needs attention", "attention"),
-        ):
-            self.account_filter.addItem(tr(title), value)
-        self.account_filter.currentIndexChanged.connect(lambda _index: self._filter())
-        self.account_filter.setFixedWidth(200)
-        toolbar.addWidget(self.account_filter)
-        self.sort_order = ComboBox()
-        self.sort_order.setAccessibleName(tr("Sort accounts"))
-        for title, value in (
-            ("Active account first", "active"),
-            ("Account name A–Z", "name"),
-            ("Account name Z–A", "name_desc"),
-            ("5-hour: most remaining", "five_most"),
-            ("5-hour: least remaining", "five_least"),
-            ("Weekly: most remaining", "weekly_most"),
-            ("Weekly: least remaining", "weekly_least"),
-            ("Next renewal first", "renewal"),
-            ("Most reset credits", "credits"),
-            ("Status: available first", "status"),
-            ("Status: attention first", "status_desc"),
-        ):
-            self.sort_order.addItem(tr(title), value)
-        self._sort_chosen = False
-        self.sort_order.currentIndexChanged.connect(self._sort_changed)
-        self.sort_order.setToolTip(self.sort_order.currentText())
-        sort_menu = QMenu(self)
-        for index in range(self.sort_order.count()):
-            action = sort_menu.addAction(self.sort_order.itemText(index))
-            action.setCheckable(True)
-            action.triggered.connect(
-                lambda _checked=False, value=index: self.sort_order.setCurrentIndex(value)
-            )
-        self.sort_button = QPushButton(tr("Sort"))
-        set_button_icon(self.sort_button, "sort", self.palette_.muted, 18)
-        self.sort_button.setFixedWidth(104)
-        self.sort_button.setMenu(sort_menu)
-        self.sort_button.setAccessibleName(tr("Sort accounts"))
-        toolbar.addWidget(self.sort_button)
-        self.sort_order.hide()
-        accounts_layout.addWidget(self.toolbar_host)
+        accounts_layout.addWidget(self.controls)
         self.account_table = AccountTable(self.palette_)
         self.account_table.sort_requested.connect(self._sort_column)
         self.table_header = self.account_table.header
@@ -214,12 +148,6 @@ class DashboardView(BaseView):
         from codex_account_manager.storage.repositories import SettingsRepository
 
         self.runner.submit(SettingsRepository().get("account_sort", "active"), self._restore_sort)
-
-    def _privacy_changed(self, hidden: bool) -> None:
-        self.email_toggle.setAccessibleName(
-            tr("Show email addresses") if hidden else tr("Hide email addresses")
-        )
-        self._filter()
 
     def _sort_column(self, modes: tuple[str, str]) -> None:
         mode = modes[1] if self.sort_order.currentData() == modes[0] else modes[0]
@@ -241,7 +169,9 @@ class DashboardView(BaseView):
                 seconds=seconds,
             )
             if enabled
-            else tr("Automatic checks and account switching are paused.")
+            else tr(
+                "Automatic switching and continuation are paused. Account information still refreshes automatically."
+            )
         )
         self._filter()
 
@@ -250,21 +180,12 @@ class DashboardView(BaseView):
             return
         with QSignalBlocker(self.sort_order):
             self.sort_order.setCurrentIndex(max(0, self.sort_order.findData(mode)))
-        self.sort_order.setToolTip(self.sort_order.currentText())
-        self.sort_button.setToolTip(self.sort_order.currentText())
-        for action in self.sort_button.menu().actions():
-            action.setChecked(action.text() == self.sort_order.currentText())
-        self._filter()
+        self.controls._sort_changed(self.sort_order.currentIndex())
 
     def _sort_changed(self, _index: int) -> None:
         from codex_account_manager.storage.repositories import SettingsRepository
 
         self._sort_chosen = True
-        self.sort_order.setToolTip(self.sort_order.currentText())
-        self.sort_button.setToolTip(self.sort_order.currentText())
-        for action in self.sort_button.menu().actions():
-            action.setChecked(action.text() == self.sort_order.currentText())
-        self._filter()
         self.runner.submit(SettingsRepository().set("account_sort", self.sort_order.currentData()))
 
     def refresh(self) -> None:
@@ -282,8 +203,6 @@ class DashboardView(BaseView):
     def _render(self, health: list[ProfileHealth]) -> None:
         from datetime import datetime
 
-        from codex_account_manager.continuity.policy import SwitchPolicy
-
         self._busy = False
         self.set_loading("accounts", False)
         self.refresh_btn.setEnabled(True)
@@ -293,15 +212,7 @@ class DashboardView(BaseView):
         self._health = health
         for widget in (self.summary, self.hero, self.toolbar_host):
             widget.setVisible(bool(health))
-        available = sum(SwitchPolicy._is_available(item) for item in health)
-        self.summary.setText(
-            tr(
-                "{total} accounts · {ready} available · {attention} need attention",
-                total=len(health),
-                ready=available,
-                attention=len(health) - available,
-            )
-        )
+        self.controls.set_summary(health)
         self.status.setText(
             tr(
                 "Updated {time} · {count} accounts",

@@ -189,7 +189,7 @@ class ActivityView(BaseView):
         )
         self.status.setText(
             tr(
-                "{shown} of {total} account switches shown",
+                "{shown} of {total} recent switches shown (maximum 50)",
                 shown=visible,
                 total=len(self._handoffs),
             )

@@ -13,7 +13,16 @@ from codex_account_manager.monitoring.power import (
     all_accounts_limited,
     work_finished,
 )
-from tests.unit.test_watcher import _health
+from tests.unit.test_watcher import _health as watcher_health
+
+
+def _health(alias, **kwargs):
+    health = watcher_health(alias, **kwargs)
+    return replace(
+        health,
+        primary_window_minutes=300,
+        primary_used_percent=100 if kwargs.get("allowed") is False else 0,
+    )
 
 
 def test_shutdown_requires_arming_and_fresh_continuous_evidence():
@@ -109,12 +118,21 @@ def test_empty_stale_unknown_reauth_and_available_accounts_never_trigger():
     assert not all_accounts_limited([good, _health("b")], now)
 
 
-def test_reset_credits_prevent_shutdown():
+def test_unused_reset_credits_do_not_restore_five_hour_capacity():
     from codex_account_manager.domain.models import ResetCredits
 
     health = _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
-    assert not all_accounts_limited(
+    assert all_accounts_limited(
         [replace(health, reset_credits=ResetCredits(available_count=1))], datetime.now(UTC)
+    )
+
+
+@pytest.mark.parametrize("percent,minutes", [(None, 300), (99, 300), (100, 10080), (100, None)])
+def test_only_verified_five_hour_exhaustion_triggers(percent, minutes):
+    health = _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    assert not all_accounts_limited(
+        [replace(health, primary_used_percent=percent, primary_window_minutes=minutes)],
+        datetime.now(UTC),
     )
 
 
@@ -132,11 +150,31 @@ def test_goal_completion_must_match_original_objective_and_budget():
     assert not work_finished(target, turn, None)
 
 
-def test_without_goal_only_the_selected_turn_completes():
+def test_without_goal_selected_conversation_completes_after_handoff():
     target = PowerTarget("work", "a", None, "turn-1")
     goal = GoalInfo("a", None, None, False)
     assert work_finished(target, {"id": "turn-1", "status": "completed"}, goal)
-    assert not work_finished(target, {"id": "turn-2", "status": "completed"}, goal)
+    assert work_finished(target, {"id": "turn-2", "status": "completed"}, goal)
+    assert not work_finished(target, {"id": "turn-2", "status": "failed"}, goal)
+    assert not work_finished(
+        target, {"id": "turn-2", "status": "completed"}, replace(goal, thread_id="other")
+    )
+
+
+def test_five_hour_limit_can_be_in_secondary_window():
+    now = datetime.now(UTC)
+    item = _health("a", allowed=False)
+    item = replace(
+        item,
+        last_checked_at=now,
+        primary_window_minutes=10080,
+        primary_used_percent=20,
+        secondary_window_minutes=300,
+        secondary_used_percent=100,
+        quota_state=QuotaState.LIMITED_NO_RESET,
+    )
+    assert all_accounts_limited([item], now)
+    assert not all_accounts_limited([replace(item, secondary_used_percent=float("nan"))], now)
 
 
 async def test_power_checks_reject_unknown_active_and_truncated_work(migrated_db, monkeypatch):

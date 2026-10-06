@@ -9,6 +9,7 @@ Run `codex-accounts doctor` first. Use `--bundle` only when you need an archive,
 | Account recovery required or existing accounts disappeared | Do not reset or delete data. Check the data directory in System check and preserve the database, backups and profile folders privately before investigating. |
 | Unbound or mismatched account | Sign in again or choose More actions → Verify account again to check the profile identity. |
 | Unknown quota | The server did not provide a definitive state. Refresh later; unknown capacity is excluded from automatic failover. |
+| Workspace routing discovery unauthorized (401) | QuotaCrew makes at most one managed refresh attempt for an isolated profile. A repeated 401 or invalidated refresh token requires signing in again from My accounts. This is an authentication failure, not proof of exhausted quota. Uncertain continuation messages are not replayed. |
 | Switch failed | Read the error and handoff detail. A successful rollback restores the previous auth/config; a pending recovery snapshot is retried on the next GUI launch or switch. |
 | Desktop readiness timeout | Quit/reopen QuotaCrew from the tray after an update. Desktop detection verifies the new account before launch and waits for the packaged Desktop process; it rolls back if that process does not appear. |
 | Goal needs user action | Native goal support is unavailable or restoration failed. Check the checkpoint and installed Codex version. |

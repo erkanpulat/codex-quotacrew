@@ -7,10 +7,12 @@ in the official client's file format; it is not an application-owned vault.
 
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
 
 from codex_account_manager.core import protection
+from codex_account_manager.core.errors import AccountMismatchError
 from codex_account_manager.core.files import atomic_write, restrict_access
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.paths import paths
@@ -170,11 +172,22 @@ class FileCredentialStore:
             return
         self.write_active_atomic(data)
 
-    def sync_active_to_profile(self, codex_home: str | Path) -> None:
+    def sync_active_to_profile(
+        self, codex_home: str | Path, *, expected_account_id: str | None = None
+    ) -> None:
         """Persist the current active auth back into a profile (atomic)."""
         active = self.read_active()
         if active is None:
             return
+        if expected_account_id is not None:
+            try:
+                account_id = json.loads(active)["tokens"]["account_id"]
+            except (ValueError, KeyError, TypeError):
+                account_id = None
+            if account_id != expected_account_id:
+                raise AccountMismatchError(
+                    "The active credentials changed before they could be saved."
+                )
         if not managed_home(codex_home):
             raise protection.CredentialProtectionError(
                 "Profile is outside managed account storage."

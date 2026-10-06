@@ -118,7 +118,7 @@ class WorkTracker:
                 )
             await db.commit()
 
-    async def ids(self, account_id: str) -> list[str]:
+    async def ids(self, account_id: str | None = None) -> list[str]:
         async with connect() as db:
             await db.execute(
                 "DELETE FROM observed_work WHERE observed_at<?", (time.time() - 86400,)
@@ -126,8 +126,8 @@ class WorkTracker:
             await db.commit()
             rows = await (
                 await db.execute(
-                    "SELECT thread_id FROM observed_work WHERE account_hash=? ORDER BY observed_at DESC",
-                    (account_hash(account_id),),
+                    "SELECT thread_id FROM observed_work WHERE (? IS NULL OR account_hash=?) ORDER BY observed_at DESC",
+                    (account_id, account_hash(account_id) if account_id else None),
                 )
             ).fetchall()
         return [row[0] for row in rows]
@@ -158,6 +158,17 @@ class WorkTracker:
             signature = goal_signature(goal) if goal is not None else None
             if row and row[0] != source:
                 if status != "inProgress":
+                    # Retire completed work from the previous account.
+                    if (
+                        status == "completed"
+                        and not limited
+                        and goal is not None
+                        and (not goal.present or goal.status in {"complete", "completed"})
+                    ):
+                        await db.execute(
+                            "DELETE FROM observed_work WHERE thread_id=?", (thread_id,)
+                        )
+                        await db.commit()
                     return
                 row = None
             if (

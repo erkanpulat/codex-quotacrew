@@ -7,8 +7,10 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
+    QFrame,
     QGridLayout,
     QHBoxLayout,
+    QLineEdit,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -20,9 +22,9 @@ from PySide6.QtWidgets import (
 from codex_account_manager.continuity.policy import SwitchPolicy
 from codex_account_manager.domain.models import Profile, ProfileHealth
 from codex_account_manager.domain.states import QuotaState
-from codex_account_manager.gui.design import DARK, Palette, set_button_icon
+from codex_account_manager.gui.design import DARK, Palette, make_icon, set_button_icon
 from codex_account_manager.gui.i18n import tr
-from codex_account_manager.gui.widgets import AccountRow, label
+from codex_account_manager.gui.widgets import AccountRow, ComboBox, CompactSwitch, label
 
 
 def account_sort_key(health: ProfileHealth, mode: str, now: float) -> tuple:
@@ -49,6 +51,14 @@ def account_sort_key(health: ProfileHealth, mode: str, now: float) -> tuple:
         and not health.error
         and not health.reauth_required
     )
+    if mode in {"subscription_soonest", "subscription_latest"}:
+        until = health.subscription_until
+        expiry = until.timestamp() if until is not None else None
+        known = verified and expiry is not None and expiry > now
+        expiry_order = 0.0
+        if known and expiry is not None:
+            expiry_order = -expiry if mode == "subscription_latest" else expiry
+        return (not known, expiry_order, *tie)
     value: float | None = None
     if mode in {"five_most", "five_least", "weekly_most", "weekly_least"}:
         duration = 300 if mode.startswith("five") else 10080
@@ -140,6 +150,7 @@ class AccountTable(QWidget):
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("AccountTableScroll")
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.scroll_area.viewport().installEventFilter(self)
         self._host = QWidget()
         self._host.setObjectName("GridHost")
@@ -245,3 +256,119 @@ class AccountTable(QWidget):
         for row in self.rows.values():
             row.set_column_widths(widths)
         self._headers.activate()
+
+
+class AccountControls(QWidget):
+    """Shared heading, privacy, filtering and sorting for both account views."""
+
+    changed = Signal()
+
+    def __init__(self, palette=DARK):
+        super().__init__()
+        self.palette_ = palette
+        self.summary = label("", "Muted")
+        self.summary.setWordWrap(True)
+        self.hero = QFrame()
+        self.hero.setMinimumHeight(40)
+        hero_box = QHBoxLayout(self.hero)
+        self.heading_layout = hero_box
+        hero_box.setContentsMargins(0, 0, 0, 0)
+        hero_box.setSpacing(12)
+        hero_box.addWidget(label(tr("Accounts"), "H2"))
+        hero_box.addWidget(self.summary, 1)
+        hero_box.addWidget(label(tr("Hide email addresses"), "Caption"))
+        self.email_toggle = CompactSwitch(tr("Hide email addresses"))
+        self.email_toggle.setObjectName("PrivacySwitch")
+        self.email_toggle.setAccessibleName(tr("Hide email addresses"))
+        self.email_toggle.toggled.connect(self._privacy_changed)
+        hero_box.addWidget(self.email_toggle)
+        self.toolbar_host = QWidget()
+        toolbar = QHBoxLayout(self.toolbar_host)
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(10)
+        self.search = QLineEdit()
+        self.search.setObjectName("AccountSearch")
+        self.search.setPlaceholderText(tr("Search by account name or email…"))
+        self.search.addAction(
+            make_icon("diagnostics", self.palette_.muted, 19),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self.search.setAccessibleName(tr("Filter profiles"))
+        self.search.setMinimumWidth(120)
+        self.search.textChanged.connect(lambda _text: self.changed.emit())
+        toolbar.addWidget(self.search, 1)
+        self.account_filter = ComboBox()
+        self.account_filter.setAccessibleName(tr("Filter accounts by availability"))
+        for title, value in (
+            ("All accounts", "all"),
+            ("Ready to use", "ready"),
+            ("Has reset credits", "credits"),
+            ("Needs attention", "attention"),
+        ):
+            self.account_filter.addItem(tr(title), value)
+        self.account_filter.currentIndexChanged.connect(lambda _index: self.changed.emit())
+        self.account_filter.setFixedWidth(200)
+        toolbar.addWidget(self.account_filter)
+        self.sort_order = ComboBox()
+        self.sort_order.setAccessibleName(tr("Sort accounts"))
+        for title, value in (
+            ("Active account first", "active"),
+            ("Account name A–Z", "name"),
+            ("Account name Z–A", "name_desc"),
+            ("5-hour: most remaining", "five_most"),
+            ("5-hour: least remaining", "five_least"),
+            ("Weekly: most remaining", "weekly_most"),
+            ("Weekly: least remaining", "weekly_least"),
+            ("Next renewal first", "renewal"),
+            ("Subscription ending soonest", "subscription_soonest"),
+            ("Subscription ending latest", "subscription_latest"),
+            ("Most reset credits", "credits"),
+            ("Status: available first", "status"),
+            ("Status: attention first", "status_desc"),
+        ):
+            self.sort_order.addItem(tr(title), value)
+        self.sort_order.currentIndexChanged.connect(self._sort_changed)
+        self.sort_order.setToolTip(self.sort_order.currentText())
+        sort_menu = QMenu(self)
+        for index in range(self.sort_order.count()):
+            action = sort_menu.addAction(self.sort_order.itemText(index))
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, value=index: self.sort_order.setCurrentIndex(value)
+            )
+        self.sort_button = QPushButton(tr("Sort"))
+        set_button_icon(self.sort_button, "sort", self.palette_.muted, 18)
+        self.sort_button.setFixedWidth(104)
+        self.sort_button.setMenu(sort_menu)
+        self.sort_button.setAccessibleName(tr("Sort accounts"))
+        toolbar.addWidget(self.sort_button)
+        self.sort_order.hide()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        layout.addWidget(self.hero)
+        layout.addWidget(self.toolbar_host)
+
+    def _privacy_changed(self, hidden: bool) -> None:
+        self.email_toggle.setAccessibleName(
+            tr("Show email addresses") if hidden else tr("Hide email addresses")
+        )
+        self.changed.emit()
+
+    def _sort_changed(self, _index: int) -> None:
+        self.sort_order.setToolTip(self.sort_order.currentText())
+        self.sort_button.setToolTip(self.sort_order.currentText())
+        for action in self.sort_button.menu().actions():
+            action.setChecked(action.text() == self.sort_order.currentText())
+        self.changed.emit()
+
+    def set_summary(self, health: list[ProfileHealth]) -> None:
+        ready = sum(SwitchPolicy._is_available(item) for item in health)
+        self.summary.setText(
+            tr(
+                "{total} accounts · {ready} available · {attention} need attention",
+                total=len(health),
+                ready=ready,
+                attention=len(health) - ready,
+            )
+        )

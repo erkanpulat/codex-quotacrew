@@ -364,7 +364,7 @@ async def test_failed_automatic_switch_uses_backoff_until_another_target(monkeyp
     assert continuity.calls == ["first", "first", "second"]
 
 
-async def test_background_monitor_is_idle_when_explicitly_paused(migrated_db):
+async def test_paused_monitor_refreshes_health_without_switching_or_tracking(migrated_db):
     import asyncio
     from unittest.mock import AsyncMock
 
@@ -376,12 +376,14 @@ async def test_background_monitor_is_idle_when_explicitly_paused(migrated_db):
     task = asyncio.create_task(watcher.run())
     try:
         await asyncio.sleep(0.08)
-        watcher.poll_once.assert_not_called()
+        watcher.poll_once.assert_awaited_once_with(allow_switch=False, track_work=False)
+        watcher.poll_once.reset_mock()
         await SettingsRepository().set("monitor_enabled", "true")
         bus.publish("monitor.settings_changed")
         async with asyncio.timeout(2):
             while not watcher.poll_once.called:
                 await asyncio.sleep(0.01)
+        watcher.poll_once.assert_awaited_once_with(allow_switch=True, track_work=True)
     finally:
         watcher.stop()
         await task

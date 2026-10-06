@@ -28,7 +28,7 @@ Windows · English / Türkçe · Light & dark themes · MIT
 
 When a usage limit interrupts a task, finding an available account and returning to the right conversation takes time. **QuotaCrew brings those steps together:** compare quotas, choose how accounts switch, and request continuation of eligible conversations in Codex Desktop or VS Code.
 
-- **See your accounts at a glance.** Five-hour and weekly capacity, quota reset times, the active account and reset credits share one table.
+- **See your accounts at a glance.** Five-hour and weekly capacity, quota reset times, the active account and reset credits share one table. Overview and My accounts share search, filters, sorting and email-hiding controls, including subscription-period sorting.
 - **Choose how you switch.** Change accounts yourself, approve a suggestion or enable automatic switching to an available account when a limit is reached.
 - **Continue in the same conversation.** A continuation request carries the existing goal and instructions back to the interrupted conversation.
 - **Follow work and its results.** Jobs, Activity and the system tray show monitoring, continuation preferences and verified running-work counts.
@@ -93,9 +93,9 @@ QuotaCrew does not install a VS Code extension. **Open project in editor** opens
 
 **Python included · No Node.js required · Existing Codex history preserved**
 
-1. **Download and open.** Get `QuotaCrew-Setup-0.2.3.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, extract the entire ZIP into a folder and open `QuotaCrew.exe`.
+1. **Download and open.** Get `QuotaCrew-Setup-0.2.4.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, extract the entire ZIP into a folder and open `QuotaCrew.exe`.
 2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
-3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open, then add your other accounts and refresh their quotas.
+3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
 
 <details>
 <summary>First-run screens and default preferences</summary>
@@ -106,7 +106,7 @@ QuotaCrew does not install a VS Code extension. **Open project in editor** opens
 
 New installations select monitoring and automatic account switching. You can change preferences during setup or later in **Settings**. Switching restarts Codex Desktop; save your work first.
 
-Enable **Keep running in the tray** to continue monitoring after closing the window. **Pause** stops monitoring and QuotaCrew's continuation operations. Starting with Windows is a separate preference. A cancelled sign-in can be retried from the account's actions menu.
+Enable **Keep running in the tray** to continue monitoring after closing the window. **Pause** stops automatic switching, work tracking and continuation; account information continues refreshing at the configured interval (60 seconds by default). Starting with Windows is a separate preference. A cancelled sign-in can be retried from the account's actions menu.
 
 Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file checksums.
 
@@ -114,7 +114,7 @@ Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file
 
 ## Keep track of your work
 
-**Jobs** brings conversations, their accounts, work status and last-check times together. Select a row to inspect its Codex goal or continuation details. **Activity** shows the results of account switches and other operations.
+**Jobs** brings conversations, their accounts, work status and last-check times together. Select a row to inspect its Codex goal or continuation details. **Activity** shows the latest 50 account-switch results.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/jobs-dark-tr.png">
@@ -123,7 +123,7 @@ Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file
 
 Search local conversations by project, source, title or folder and open the project in your editor. `Ctrl+F` focuses search; `Ctrl+R` refreshes the page. **Clear tracking** clears QuotaCrew's observations and pauses monitoring; it preserves Codex conversation history. Stop a running conversation with Codex's own **Stop** action.
 
-**Automatic shutdown** gives you three clear choices: finish a selected conversation, exhaust all saved accounts' available limits, or shut down after a set time. Work and limit conditions start a fixed **2-minute cancellation countdown** once verified and no other Codex work is active. The timer accepts **1–1440 minutes** (120 = two hours), including the final warning, and does not wait for work to finish. Plans require confirmation, last only for the current session and never forcibly close applications. [Shutdown conditions](docs/continuity.md#optional-windows-shutdown).
+**Automatic shutdown** gives you three clear choices: finish a selected conversation, exhaust every saved account’s verified five-hour quota with no available account to switch to, or shut down after a set time. Work and limit conditions start a fixed **2-minute cancellation countdown** once verified and no other Codex work is active. The timer accepts **1–1440 minutes** (120 = two hours), including the final warning, and does not wait for work to finish. Plans require confirmation, last only for the current session and never forcibly close applications. [Shutdown conditions](docs/continuity.md#optional-windows-shutdown).
 
 ![Automatic shutdown with three conditions, a duration picker and plan summary](docs/images/power-en.png)
 

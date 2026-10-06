@@ -99,6 +99,34 @@ async def test_native_delivery_stays_in_desktop_and_tracks_next_account_limit(mi
     assert supervisor.native.send.await_count == 1
 
 
+async def test_routing_401_is_reported_as_authentication_not_quota(migrated_db):
+    supervisor, server, source, ticket = setup_native()
+    rejected = {
+        "id": "native-next",
+        "status": "failed",
+        "error": {"message": "workspace routing discovery unauthorized (401)"},
+    }
+    supervisor.native.latest_turn.side_effect = [source, source, rejected]
+    server.latest_turn = AsyncMock(return_value=rejected)
+    supervisor.report = AsyncMock()
+    await supervisor.run(ticket)
+    supervisor.report.assert_any_await("thread", "needs_user", "authentication")
+    supervisor.native.send.assert_awaited_once()
+    assert not await supervisor.tracker.limited("acc-1")
+
+
+async def test_routing_401_during_delivery_is_not_replayed(migrated_db):
+    supervisor, server, source, ticket = setup_native()
+    supervisor.native.send.side_effect = AppServerError(
+        "workspace routing discovery unauthorized (401)"
+    )
+    supervisor.report = AsyncMock()
+    await supervisor.run(ticket)
+    supervisor.report.assert_any_await("thread", "needs_user", "authentication")
+    await supervisor.run(ticket)
+    supervisor.native.send.assert_awaited_once()
+
+
 @pytest.mark.parametrize("fault", ["account", "new_turn", "running", "goal", "uncertain"])
 async def test_native_delivery_stops_on_conflicts_and_never_retries_uncertain(migrated_db, fault):
     supervisor, server, source, ticket = setup_native()

@@ -52,6 +52,14 @@ async def test_old_quota_failure_is_not_adopted_by_another_account(migrated_db):
     assert not await tracker.limited("new")
 
 
+async def test_completed_work_is_retired_after_account_switch(migrated_db):
+    tracker = WorkTracker()
+    goal = GoalInfo("thread", None, None, False)
+    await tracker.observe("previous", "thread", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.observe("new", "thread", {"id": "turn", "status": "completed"}, goal)
+    assert not await tracker.visible()
+
+
 async def test_running_work_survives_restart_and_remains_tracked_outside_recent_twenty(
     migrated_db, monkeypatch
 ):

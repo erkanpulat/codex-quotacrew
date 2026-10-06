@@ -809,6 +809,7 @@ class MainWindow(QMainWindow):
                 )
         if event.topic == "health.updated":
             self.dashboard._render(event.payload["health"])
+            self.accounts_view._render(event.payload["health"])
         elif event.topic == "switch.suggested":
             self._switch(event.payload["target"], follow_latest=True)
         elif event.topic == "switch.failed" and "alias" not in event.payload:
@@ -851,6 +852,10 @@ class MainWindow(QMainWindow):
                 "skipped": "Automatic continuation was skipped. See the work details.",
             }
             message = tr(messages.get(event.payload["state"], messages["needs_user"]))
+            if event.payload.get("stage") == "authentication":
+                message = tr(
+                    "Codex rejected the continuation with an authentication error (401). This is not a quota result. Check the active account in the affected Codex window; the message will not be sent again automatically."
+                )
             transient_issue = event.payload.get("state") == "needs_user" and event.payload.get(
                 "stage"
             ) in {
@@ -861,8 +866,11 @@ class MainWindow(QMainWindow):
                 "checkpoint",
                 "preparation",
                 "journal",
+                "execution",
+                "observation",
+                "authentication",
             }
-            if transient_issue:
+            if transient_issue and event.payload.get("stage") != "authentication":
                 message = tr(
                     "Automatic continuation could not be verified. This does not mean your account quota is exhausted. See Jobs for details."
                 )

@@ -560,6 +560,27 @@ async def test_expired_profile_access_uses_one_official_refresh(monkeypatch):
     assert request.await_count == 4
 
 
+@pytest.mark.parametrize("failure", ["refresh_token_invalidated", "HTTP 401"])
+async def test_preflight_rejects_revoked_session_without_retry(monkeypatch, failure):
+    from codex_account_manager.core.errors import SignInRequiredError
+
+    server = CodexAppServer("profile", refresh_on_unauthorized=True)
+    request = AsyncMock(side_effect=AppServerError(failure))
+    monkeypatch.setattr(server, "_request", request)
+    with pytest.raises(SignInRequiredError):
+        await server.read_account(force_refresh=True)
+    request.assert_awaited_once_with("account/read", {"refreshToken": True})
+
+
+async def test_preflight_never_refreshes_shared_session(monkeypatch):
+    server = CodexAppServer("shared")
+    request = AsyncMock()
+    monkeypatch.setattr(server, "_request", request)
+    with pytest.raises(AppServerError, match="isolated"):
+        await server.read_account(force_refresh=True)
+    request.assert_not_awaited()
+
+
 @pytest.mark.parametrize("failure", ["HTTP 429", "HTTP 503", "timed out", "connection reset"])
 async def test_temporary_failure_never_forces_token_rotation(monkeypatch, failure):
     server = CodexAppServer("profile", refresh_on_unauthorized=True)
@@ -579,8 +600,48 @@ async def test_shared_home_never_forces_refresh_on_unauthorized(monkeypatch):
     assert request.await_count == 2
 
 
+@pytest.mark.parametrize("quota_rejected", [False, True])
+async def test_workspace_discovery_401_refreshes_only_once(monkeypatch, quota_rejected):
+    from codex_account_manager.core.errors import SignInRequiredError
+
+    server = CodexAppServer("profile", refresh_on_unauthorized=True)
+    request = AsyncMock(
+        side_effect=[
+            AppServerError("workspace routing discovery unauthorized (401)"),
+            {"account": {"id": "owner"}},
+            AppServerError("HTTP 401") if quota_rejected else {"accountId": "owner"},
+        ]
+    )
+    monkeypatch.setattr(server, "_request", request)
+    if quota_rejected:
+        with pytest.raises(SignInRequiredError):
+            await server.read_account()
+    else:
+        assert (await server.read_account()).account_id == "owner"
+    assert request.await_args_list[1].args == ("account/read", {"refreshToken": True})
+    assert request.await_count == 3
+
+
+async def test_shared_workspace_discovery_does_not_rotate_token(monkeypatch):
+    server = CodexAppServer("shared")
+    request = AsyncMock(
+        side_effect=AppServerError("workspace routing discovery unauthorized (401)")
+    )
+    monkeypatch.setattr(server, "_request", request)
+    with pytest.raises(AppServerError):
+        await server.read_account()
+    assert request.await_count == 1
+
+
 @pytest.mark.parametrize(
-    "failure", ["refresh_token_revoked", "refresh_token_reused", "invalid_grant", "HTTP 401"]
+    "failure",
+    [
+        "refresh_token_revoked",
+        "refresh_token_reused",
+        "refresh_token_invalidated",
+        "invalid_grant",
+        "HTTP 401",
+    ],
 )
 async def test_failed_refresh_is_bounded_and_requires_reauthentication(monkeypatch, failure):
     from codex_account_manager.core.errors import SignInRequiredError

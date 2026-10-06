@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-quotacrew"
-version = "0.2.3"
+version = "0.2.4"
 description = "QuotaCrew for Codex: multi-account management, quota monitoring and conversation continuation for Windows."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

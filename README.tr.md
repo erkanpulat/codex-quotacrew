@@ -30,6 +30,8 @@ Bir işin ortasında limit dolduğunda, hangi hesabın kullanılabilir olduğunu
 
 Plan rozeti, eşleşen bilgi mevcutsa giriş sırasında kaydedilen abonelik dönemi tarihini de gösterir. Son kontrol ve kaynak açıklaması için üzerine gelin; bu tarih kesin yenileme veya iptal bilgisi değildir.
 
+Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-posta gizleme kontrollerini kullanır. Hesapları, mevcutsa kaydedilmiş abonelik dönemi tarihine göre de sıralayabilirsiniz.
+
 ## Devam akışı
 
 İzleme ve ilgili devam seçeneği açıkken QuotaCrew, kota nedeniyle kesilen işi algılar ve kullanılabilir hesabı kontrol eder. Geçişin ardından **aynı konuşmaya** bir devam isteği gönderir; yeni turun durumunu takip ederek sonucu İşler sayfasında gösterir.
@@ -87,9 +89,9 @@ QuotaCrew bir VS Code eklentisi yüklemez. **Projeyi editörde aç** klasörü a
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve açın.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.2.3.exe` dosyasını indirip kurun. Taşınabilir kullanım için ZIP'in tamamını bir klasöre çıkarın ve `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve açın.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.2.4.exe` dosyasını indirip kurun. Taşınabilir kullanım için ZIP'in tamamını bir klasöre çıkarın ve `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
-3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın; ardından diğer hesaplarınızı ekleyip kotaları yenileyin.
+3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 
 <details>
 <summary>İlk açılış ekranları ve varsayılan tercihler</summary>
@@ -100,7 +102,7 @@ QuotaCrew bir VS Code eklentisi yüklemez. **Projeyi editörde aç** klasörü a
 
 Yeni kurulumlarda izleme ve otomatik hesap geçişi seçilidir. Tercihlerinizi ilk açılışta ve daha sonra **Ayarlar**'da değiştirebilirsiniz. Hesap geçişi Codex Desktop'ı yeniden başlatır; çalışmalarınızı kaydedin.
 
-Pencere kapandıktan sonra izlemenin sürmesi için **Tepside çalışmaya devam et** seçeneğini açın. **Duraklat**, izlemeyi ve QuotaCrew'ün devam işlemlerini durdurur. Windows ile başlatma ayrı bir tercihtir. İptal edilen hesap girişini ilgili hesabın işlem menüsünden yeniden başlatabilirsiniz.
+Pencere kapandıktan sonra izlemenin sürmesi için **Tepside çalışmaya devam et** seçeneğini açın. **Duraklat**, otomatik geçişi, iş takibini ve devam işlemlerini durdurur; hesap bilgileri ayarlanan aralıkla (varsayılan 60 saniye) yenilenmeye devam eder. Windows ile başlatma ayrı bir tercihtir. İptal edilen hesap girişini ilgili hesabın işlem menüsünden yeniden başlatabilirsiniz.
 
 Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarının doğrulama değerlerini içerir.
 
@@ -108,7 +110,7 @@ Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarını
 
 ## İşlerinizi gözden kaçırmayın
 
-**İşler** sayfasında konuşmaları, bağlı hesapları, çalışma durumlarını ve son kontrol zamanlarını birlikte görün. Bir işi seçerek Codex hedefini veya devam işleminin ayrıntılarını açın. **Etkinlik** sayfasında hesap geçişlerinin ve işlemlerin sonuçlarını takip edin.
+**İşler** sayfasında konuşmaları, bağlı hesapları, çalışma durumlarını ve son kontrol zamanlarını birlikte görün. Bir işi seçerek Codex hedefini veya devam işleminin ayrıntılarını açın. **Etkinlik** sayfasında son 50 hesap geçişinin sonucunu takip edin.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/jobs-dark-tr.png">
@@ -117,7 +119,7 @@ Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarını
 
 Yerel konuşmalarınızı proje, kaynak, başlık veya klasöre göre arayın; ilgili projeyi editörünüzde açın. `Ctrl+F` aramaya odaklanır, `Ctrl+R` sayfayı yeniler. **Takibi temizle**, QuotaCrew'ün takip kayıtlarını temizleyip izlemeyi duraklatır; Codex sohbet geçmişinizi silmez. Çalışan bir konuşmayı durdurmak için Codex'in **Durdur** düğmesini kullanın.
 
-**Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların kullanılabilir limitleri dolduğunda veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
+**Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların doğrulanmış 5 saatlik kotaları dolup geçilebilecek hesap kalmadığında veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
 
 ![Üç koşul, süre seçimi ve plan özetiyle otomatik kapatma](docs/images/power-tr.png)
 

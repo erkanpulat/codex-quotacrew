@@ -44,18 +44,29 @@ def all_accounts_limited(health: list[ProfileHealth], now: datetime) -> bool:
         and not h.error
         and not h.stale
         and not h.reauth_required
+        and any(
+            minutes == 300 and used is not None and math.isfinite(used) and used >= 100
+            for minutes, used in (
+                (h.primary_window_minutes, h.primary_used_percent),
+                (h.secondary_window_minutes, h.secondary_used_percent),
+            )
+        )
         and h.ordinary_usage_allowed is False
         and h.quota_state in {QuotaState.LIMITED_WITH_RESET, QuotaState.LIMITED_NO_RESET}
         and h.last_checked_at is not None
         and h.last_checked_at.tzinfo is not None
         and 0 <= (now - h.last_checked_at).total_seconds() <= 60
-        and not (h.reset_credits and h.reset_credits.available_count > 0)
         for h in health
     )
 
 
 def work_finished(target: PowerTarget, turn: dict | None, goal: GoalInfo | None) -> bool:
-    if not turn or turn.get("status") != "completed" or goal is None:
+    if (
+        not turn
+        or turn.get("status") != "completed"
+        or goal is None
+        or goal.thread_id != target.thread_id
+    ):
         return False
     if target.goal_signature is not None:
         return (
@@ -63,7 +74,8 @@ def work_finished(target: PowerTarget, turn: dict | None, goal: GoalInfo | None)
             and goal_signature(goal) == target.goal_signature
             and goal.status in {"complete", "completed"}
         )
-    return not goal.present and turn.get("id") == target.turn_id
+    # Continuation creates a new turn in the same selected conversation.
+    return not goal.present and bool(turn.get("id"))
 
 
 class ShutdownPlan:

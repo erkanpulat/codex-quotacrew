@@ -219,6 +219,7 @@ class AuthTransaction:
             # Resolve the dependency before checking/rotating credentials, writing
             # a recovery snapshot, or stopping any application.
             await asyncio.to_thread(self.desktop.require_available)
+        source_profile: Profile | None = None
         if self._verify_account is None:
             from codex_account_manager.accounts.service import AccountService
 
@@ -226,9 +227,19 @@ class AuthTransaction:
             active_id = await service._active_account_id_safe()
             for profile in await service.list_profiles():
                 if active_id and profile.bound_account_id == active_id:
-                    self.credentials.sync_active_to_profile(profile.codex_home)
+                    source_profile = profile
+                    self.credentials.sync_active_to_profile(
+                        profile.codex_home, expected_account_id=profile.bound_account_id
+                    )
                     break
-            account_id = await self._verify(Path(target.codex_home))
+            # A valid access token can conceal a revoked refresh session.
+            account_id = await self._verify(
+                self.credentials.shared_home
+                if active_id == target.bound_account_id
+                else Path(target.codex_home),
+                force_refresh=bool(active_id and active_id != target.bound_account_id)
+                or not self.credentials.active_auth_path.exists(),
+            )
             if account_id != target.bound_account_id:
                 raise AccountMismatchError("Profile credentials no longer match its bound account.")
         new_auth = self.credentials.read_profile(target.codex_home)
@@ -255,6 +266,16 @@ class AuthTransaction:
             if self.launch_desktop or self.desktop.is_running():
                 stage(TransactionStage.STOP_DESKTOP)
                 self.desktop.stop()
+            if source_profile is not None:
+                # Preserve any credential rotation during Desktop shutdown.
+                source_id = await self._verify(self.credentials.shared_home)
+                if source_id != source_profile.bound_account_id:
+                    raise AccountMismatchError("The source account changed during handoff.")
+                self.credentials.sync_active_to_profile(
+                    source_profile.codex_home, expected_account_id=source_profile.bound_account_id
+                )
+                if source_profile.id == target.id:
+                    new_auth = self.credentials.read_profile(target.codex_home)
             self._arm_recovery()
             self.credentials.ensure_file_auth_config()
             stage(TransactionStage.ATOMIC_REPLACE)
@@ -307,12 +328,12 @@ class AuthTransaction:
                 detail, stage=current_stage.value, rolled_back=rolled_back
             ) from exc
 
-    async def _verify(self, codex_home: Path) -> str | None:
+    async def _verify(self, codex_home: Path, *, force_refresh: bool = False) -> str | None:
         if self._verify_account is not None:
             return await self._verify_account(str(codex_home))
         from codex_account_manager.accounts.service import AccountService
 
-        snapshot = await AccountService().read_snapshot(codex_home)
+        snapshot = await AccountService().read_snapshot(codex_home, force_refresh=force_refresh)
         return snapshot.account_id
 
 

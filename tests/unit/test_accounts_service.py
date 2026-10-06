@@ -356,3 +356,28 @@ def test_only_managed_profile_homes_enable_forced_auth_recovery(tmp_paths):
     assert _default_factory(str(tmp_paths.profiles_dir / "account")).refresh_on_unauthorized
     assert not _default_factory(str(tmp_paths.shared_codex_home)).refresh_on_unauthorized
     assert not _default_factory(str(tmp_paths.data_dir / "external")).refresh_on_unauthorized
+
+
+async def test_signed_out_shared_home_does_not_rotate_saved_credentials(migrated_db):
+    from codex_account_manager.core.errors import SignedOutError
+
+    service = AccountService()
+    profile = await service.create_profile("work")
+    service.credentials.active_auth_path.parent.mkdir(parents=True, exist_ok=True)
+    service.credentials.active_auth_path.write_text("{}")
+    refresh_permissions = []
+
+    async def signed_out(*args, **kwargs):
+        raise SignedOutError("Shared account is not ready")
+
+    async def health(profile, **kwargs):
+        refresh_permissions.append(kwargs["allow_refresh"])
+        return None
+
+    service.read_snapshot = signed_out
+    service._health_for = health
+    await service._health_batch([profile])
+    assert refresh_permissions == [False]
+    service.credentials.active_auth_path.unlink()
+    await service._health_batch([profile])
+    assert refresh_permissions == [False, True]

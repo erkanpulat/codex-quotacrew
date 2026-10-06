@@ -190,11 +190,12 @@ async def test_last_restart_check_preserves_work_started_during_handoff(
     service.automation.prepare = changed_prepare
     desktop = FakeDesktop()
     store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
-    store.write_active_atomic(b"source-auth")
+    source_auth = b'{"tokens":{"account_id":"acc-1"}}'
+    store.write_active_atomic(source_auth)
     tx = AuthTransaction(credential_store=store, desktop=desktop)
     monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value="acc-1"))
 
-    async def verify(home):
+    async def verify(home, *, force_refresh=False):
         nonlocal turn
         assert Path(home) != migrated_db.shared_codex_home
         if change == "target_verification":
@@ -205,7 +206,7 @@ async def test_last_restart_check_preserves_work_started_during_handoff(
     with pytest.raises(HandoffDeferredError):
         await service.continue_on_limit("hesap2", transaction=tx)
     assert desktop.stopped == desktop.launched == 0
-    assert store.read_active() == b"source-auth"
+    assert store.read_active() == source_auth
     assert not tx.recovery_path.exists()
     assert not service.automation.tasks
     async with connect() as db:
