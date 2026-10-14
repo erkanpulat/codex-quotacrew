@@ -33,7 +33,6 @@ from codex_account_manager.core.errors import (
     AppServerError,
     OperationBusyError,
     ProfileNotFoundError,
-    SignedOutError,
     SignInRequiredError,
 )
 from codex_account_manager.core.files import restrict_access
@@ -44,7 +43,7 @@ from codex_account_manager.core.protection import CredentialProtectionError
 from codex_account_manager.core.redaction import redact_text
 from codex_account_manager.domain.models import AccountSnapshot, Profile, ProfileHealth
 from codex_account_manager.domain.states import QuotaState
-from codex_account_manager.storage.repositories import ProfileRepository
+from codex_account_manager.storage.repositories import ProfileRepository, SettingsRepository
 
 log = get_logger(__name__)
 
@@ -88,6 +87,17 @@ class AccountService:
 
     async def list_profiles(self) -> list[Profile]:
         return await self.profiles.list()
+
+    def _credential_fingerprint(self, profile: Profile) -> str:
+        try:
+            return sha256(self.credentials.read_profile(profile.codex_home)).hexdigest()
+        except FileNotFoundError:
+            return "missing"
+
+    async def reject_profile(self, profile: Profile) -> None:
+        await SettingsRepository().set(
+            f"rejected_auth:{profile.id}", self._credential_fingerprint(profile)
+        )
 
     async def create_profile(self, alias: str) -> Profile:
         alias = _validate_alias(alias)
@@ -226,29 +236,65 @@ class AccountService:
         try:
             with OperationLock(paths.data_dir / "account-operation.lock"):
                 allow_refresh = True
+                rejected_active = None
                 try:
                     active = await self.read_snapshot(paths.shared_codex_home)
                     if not active.account_id and self.credentials.active_auth_path.exists():
                         raise AppServerError("The active account identity is unavailable.")
-                except SignedOutError:
+                except SignInRequiredError as exc:
                     allow_refresh = not self.credentials.active_auth_path.exists()
                     active = None
+                    rejected_active = exc
                 except Exception:
                     allow_refresh = not self.credentials.active_auth_path.exists()
                     active = None
                 active_id = active.account_id if active else None
+                if rejected_active is not None:
+                    active_id = self.credentials.active_account_hint()
                 semaphore = asyncio.Semaphore(_MAX_CONCURRENT_READS)
+                rejected = await SettingsRepository().all()
 
-                async def bounded(profile: Profile) -> ProfileHealth:
-                    async with semaphore:
+                async def checked(profile: Profile) -> ProfileHealth:
+                    try:
+                        if (
+                            rejected_active is not None
+                            and active_id
+                            and profile.bound_account_id == active_id
+                        ):
+                            if (
+                                self.credentials.profile_auth_path(profile.codex_home).exists()
+                                and self.credentials.read_active()
+                                == self.credentials.read_profile(profile.codex_home)
+                            ):
+                                await self.reject_profile(profile)
+                            return self._failed_health(
+                                profile, rejected_active, active_account_id=active_id
+                            )
+                        fingerprint = rejected.get(f"rejected_auth:{profile.id}")
+                        if fingerprint and fingerprint == self._credential_fingerprint(profile):
+                            return self._failed_health(
+                                profile,
+                                SignInRequiredError(
+                                    "Codex rejected this sign-in. Sign in again in Accounts."
+                                ),
+                                active_account_id=active_id,
+                            )
                         return await self._health_for(
                             profile,
                             active_account_id=active_id,
                             active_snapshot=active,
                             allow_refresh=allow_refresh,
                         )
+                    except Exception as exc:
+                        return self._failed_health(profile, exc, active_account_id=active_id)
 
-                return list(await asyncio.gather(*(bounded(p) for p in profiles)))
+                async def bounded(profile: Profile) -> ProfileHealth:
+                    async with semaphore:
+                        return await checked(profile)
+
+                async with asyncio.TaskGroup() as group:
+                    tasks = [group.create_task(bounded(profile)) for profile in profiles]
+                return [task.result() for task in tasks]
         except OperationBusyError:
             raise
         except Exception as exc:

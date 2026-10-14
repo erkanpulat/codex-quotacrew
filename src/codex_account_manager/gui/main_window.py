@@ -42,7 +42,7 @@ from codex_account_manager.gui.design import (
 )
 from codex_account_manager.gui.diagnostics import DiagnosticsView
 from codex_account_manager.gui.goals import GoalsView
-from codex_account_manager.gui.i18n import continuation_detail, tr
+from codex_account_manager.gui.i18n import continuation_detail, error_message, tr
 from codex_account_manager.gui.overview import DashboardView
 from codex_account_manager.gui.power import PowerView
 from codex_account_manager.gui.settings import SettingsView
@@ -189,6 +189,10 @@ class MainWindow(QMainWindow):
         dismiss.clicked.connect(self._dismiss_notice)
         notice_layout.addWidget(dismiss)
         self.notice.hide()
+        self._notice_timer = QTimer(self)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.timeout.connect(self._dismiss_notice)
+        self._last_transient_notice: str | None = None
         content_layout.addWidget(self.notice)
         content_layout.addWidget(self.stack, 1)
         content_layout.addWidget(self.power_banner)
@@ -681,6 +685,9 @@ class MainWindow(QMainWindow):
             self._switching = False
             return
         self.dashboard.setEnabled(False)
+        self._notice_timer.stop()
+        self._last_transient_notice = None
+        self.notice.hide()
         self.statusBar().showMessage(tr("Switching to {alias}…", alias=alias))
 
         async def _do():
@@ -693,6 +700,8 @@ class MainWindow(QMainWindow):
 
     def _switch_done(self, alias: str) -> None:
         self._switching = False
+        self._notice_timer.stop()
+        self._last_transient_notice = None
         self.dashboard.setEnabled(True)
         self.statusBar().showMessage(
             tr("Switched to {alias}. Shared history preserved.", alias=alias)
@@ -705,9 +714,8 @@ class MainWindow(QMainWindow):
     def _switch_failed(self, exc: Exception) -> None:
         self._switching = False
         self.dashboard.setEnabled(True)
-        self.statusBar().showMessage(tr("Switch failed. Check the error and Diagnostics."))
-        self.notice_text.setText(tr("Switch failed") + ": " + tr(str(exc)))
-        self.notice.show()
+        log.warning("Account switch failed: %s", exc)
+        self._show_transient_notice(tr("Switch failed") + ": " + error_message(str(exc)))
         from codex_account_manager.platform.windows import DESKTOP_MISSING_MESSAGE
 
         missing = str(exc) == DESKTOP_MISSING_MESSAGE
@@ -721,9 +729,17 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _operation_failed(self, message: str) -> None:
-        self.statusBar().showMessage(message)
+        log.warning("Operation failed: %s", message)
+        self._show_transient_notice(error_message(message))
+
+    def _show_transient_notice(self, message: str) -> None:
+        if self._last_transient_notice == message:
+            return
+        self._last_transient_notice = message
+        self.statusBar().showMessage(message, 12000)
         self.notice_text.setText(message)
         self.notice.show()
+        self._notice_timer.start(12000)
 
     def _show_toast(self, message: str) -> None:
         self.toast.setText(message)
@@ -755,6 +771,7 @@ class MainWindow(QMainWindow):
         }
         if not visible:
             return False
+        self._notice_timer.stop()
         self.notice_text.setText(
             next(iter(visible.values()))
             if len(visible) == 1
@@ -813,8 +830,12 @@ class MainWindow(QMainWindow):
         elif event.topic == "switch.suggested":
             self._switch(event.payload["target"], follow_latest=True)
         elif event.topic == "switch.failed" and "alias" not in event.payload:
-            self._switch_failed(RuntimeError(event.payload["detail"]))
+            self._operation_failed(event.payload["detail"])
         elif event.topic == "switch.completed":
+            self._notice_timer.stop()
+            self._last_transient_notice = None
+            self.notice.hide()
+            self.statusBar().showMessage(tr("Account switched successfully."), 4500)
             self.dashboard.refresh()
             if self._shared_waits:
                 for thread_id in self._shared_waits:
@@ -823,10 +844,7 @@ class MainWindow(QMainWindow):
                 if not self._show_continuation_issues():
                     self.notice.hide()
         elif event.topic == "switch.deferred":
-            message = tr(event.payload["detail"])
-            self.statusBar().showMessage(message)
-            self.notice_text.setText(message)
-            self.notice.show()
+            self._show_transient_notice(error_message(event.payload["detail"]))
         elif event.topic == "work.observed":
             self.conversations.refresh_tracking()
             if self.stack.currentIndex() == 0:

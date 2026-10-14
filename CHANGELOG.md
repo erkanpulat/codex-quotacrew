@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5 — 2026-10-14
+
+- Keep rejected sign-ins out of automatic selection until their saved credentials change.
+- Recover from an expired active sign-in while retaining conversation restart safety checks.
+- Queue manual account switches behind active checks and release locks after cancellation cleanup.
+- Preserve typed busy errors for automatic UI retries; translate and expire transient error notices.
+
 ## 0.2.4 — 2026-10-06
 
 - Improve account-switch authentication and handling of expired sessions.

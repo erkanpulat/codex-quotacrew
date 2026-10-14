@@ -150,6 +150,13 @@ class FileCredentialStore:
         path = self.active_auth_path
         return path.read_bytes() if path.exists() else None
 
+    def active_account_hint(self) -> str | None:
+        try:
+            account_id = json.loads(self.read_active() or b"{}").get("tokens", {}).get("account_id")
+            return account_id if isinstance(account_id, str) and account_id else None
+        except (OSError, ValueError, AttributeError, TypeError):
+            return None
+
     def write_active_atomic(self, data: bytes) -> None:
         atomic_write(self.active_auth_path, data)
 

@@ -15,7 +15,7 @@ from codex_account_manager.core.errors import HandoffDeferredError, OperationBus
 from codex_account_manager.core.events import bus
 from codex_account_manager.core.logging import get_logger
 from codex_account_manager.domain.models import ProfileHealth
-from codex_account_manager.domain.states import SwitchPolicyKind
+from codex_account_manager.domain.states import HandoffReason, SwitchPolicyKind
 from codex_account_manager.monitoring.settings import (
     DEFAULT_POLICY,
     poll_interval,
@@ -127,7 +127,13 @@ class Watcher:
             return
         log.info("Policy failover: %s", decision.reason)
         try:
-            await self.continuity.continue_on_limit(decision.target.alias)
+            if current is not None and current.reauth_required:
+                await self.continuity.continue_on_limit(
+                    decision.target.alias,
+                    reason=HandoffReason.AUTH_EXPIRED,
+                )
+            else:
+                await self.continuity.continue_on_limit(decision.target.alias)
             self._failed_switch = None
             self._retry_at = 0.0
             self._retry_delay = 300.0

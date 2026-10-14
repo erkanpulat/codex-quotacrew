@@ -69,9 +69,14 @@ class SwitchPolicy:
     def _current_limited(current: ProfileHealth | None) -> bool:
         if current is None:
             return False
-        return current.ordinary_usage_allowed is False or current.quota_state in (
-            QuotaState.LIMITED_WITH_RESET,
-            QuotaState.LIMITED_NO_RESET,
+        return (
+            current.reauth_required
+            or current.ordinary_usage_allowed is False
+            or current.quota_state
+            in (
+                QuotaState.LIMITED_WITH_RESET,
+                QuotaState.LIMITED_NO_RESET,
+            )
         )
 
     def _best_candidate(

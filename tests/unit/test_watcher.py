@@ -90,6 +90,35 @@ async def test_failover_continues_limited_conversation():
     assert continuity.continued == ["hesap2"]
 
 
+async def test_failover_records_authentication_recovery():
+    from dataclasses import replace
+
+    from codex_account_manager.domain.states import HandoffReason
+
+    health = [
+        replace(_health("ana", active=True), reauth_required=True),
+        _health("hesap2", secondary=5.0),
+    ]
+
+    class Continuity(_FakeContinuity):
+        async def observe_work(self):
+            return "account-a"
+
+        async def continue_on_limit(self, alias: str, **kwargs):
+            self.continued.append((alias, kwargs["reason"]))
+
+    continuity = Continuity()
+    watcher = Watcher(
+        accounts=_StubAccounts(health),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
+    )
+
+    await watcher.poll_once()
+
+    assert continuity.continued == [("hesap2", HandoffReason.AUTH_EXPIRED)]
+
+
 async def test_free_zero_usage_never_triggers_a_failover_or_fallback():
     from dataclasses import replace
 

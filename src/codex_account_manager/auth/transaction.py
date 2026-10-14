@@ -15,7 +15,11 @@ from codex_account_manager.adapters.credential_store import FileCredentialStore
 from codex_account_manager.adapters.desktop import WindowsDesktopLauncher
 from codex_account_manager.adapters.interfaces import DesktopLauncher
 from codex_account_manager.core import protection
-from codex_account_manager.core.errors import AccountMismatchError, TransactionError
+from codex_account_manager.core.errors import (
+    AccountMismatchError,
+    SignInRequiredError,
+    TransactionError,
+)
 from codex_account_manager.core.events import bus
 from codex_account_manager.core.files import atomic_write
 from codex_account_manager.core.logging import get_logger
@@ -82,6 +86,7 @@ class AuthTransaction:
         verify_account=None,
         wait_ready_timeout: float = 40.0,
         launch_desktop: bool | None = None,
+        lock_timeout: float = 0.0,
     ):
         self.credentials = credential_store or FileCredentialStore()
         self.desktop = desktop if desktop is not None else _default_desktop()
@@ -89,6 +94,7 @@ class AuthTransaction:
         self.wait_ready_timeout = wait_ready_timeout
         self._launch_requested = launch_desktop
         self.launch_desktop = launch_desktop is not False
+        self.lock_timeout = lock_timeout
 
     @property
     def recovery_path(self) -> Path:
@@ -185,7 +191,9 @@ class AuthTransaction:
         after_switch: Callable[[], Awaitable[None]] | None = None,
         before_desktop_stop: Callable[[], Awaitable[None]] | None = None,
     ) -> SwitchResult:
-        with OperationLock(paths.data_dir / "account-operation.lock"):
+        async with OperationLock(paths.data_dir / "account-operation.lock").wait(
+            timeout=self.lock_timeout
+        ):
             if self.recovery_path.exists():
                 self._restore()
             return await self._switch_locked(
@@ -223,8 +231,9 @@ class AuthTransaction:
         if self._verify_account is None:
             from codex_account_manager.accounts.service import AccountService
 
-            service = AccountService()
+            service = AccountService(credential_store=self.credentials)
             active_id = await service._active_account_id_safe()
+            source_hint = active_id or self.credentials.active_account_hint()
             for profile in await service.list_profiles():
                 if active_id and profile.bound_account_id == active_id:
                     source_profile = profile
@@ -232,14 +241,17 @@ class AuthTransaction:
                         profile.codex_home, expected_account_id=profile.bound_account_id
                     )
                     break
-            # A valid access token can conceal a revoked refresh session.
-            account_id = await self._verify(
-                self.credentials.shared_home
-                if active_id == target.bound_account_id
-                else Path(target.codex_home),
-                force_refresh=bool(active_id and active_id != target.bound_account_id)
-                or not self.credentials.active_auth_path.exists(),
-            )
+            try:
+                account_id = await self._verify(
+                    self.credentials.shared_home
+                    if active_id == target.bound_account_id
+                    else Path(target.codex_home),
+                    force_refresh=bool(source_hint and source_hint != target.bound_account_id)
+                    or not self.credentials.active_auth_path.exists(),
+                )
+            except SignInRequiredError:
+                await service.reject_profile(target)
+                raise
             if account_id != target.bound_account_id:
                 raise AccountMismatchError("Profile credentials no longer match its bound account.")
         new_auth = self.credentials.read_profile(target.codex_home)

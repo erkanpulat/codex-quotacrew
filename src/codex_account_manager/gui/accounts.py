@@ -273,7 +273,9 @@ class AccountsView(BaseView):
         )
         self.operation_status.show()
         self._set_actions_enabled(True)
-        QMessageBox.warning(self, tr("Operation failed"), tr(str(error)))
+        from codex_account_manager.gui.i18n import error_message
+
+        QMessageBox.warning(self, tr("Operation failed"), error_message(str(error)))
         self.refresh()
 
     def _bind(self, alias: str) -> None:

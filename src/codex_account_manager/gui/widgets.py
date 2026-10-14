@@ -416,7 +416,7 @@ class AccountRow(QFrame):
             notice = label(explanation, "Caption")
             notice.setWordWrap(True)
             root.addWidget(notice, 1, 0, 1, 5)
-            self.setToolTip(health.error)
+            self.setToolTip(explanation)
 
     def set_column_widths(self, widths: tuple[int, int, int, int, int]) -> None:
         identity, five_hour, weekly, status, actions = widths

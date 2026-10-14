@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from codex_account_manager.core.errors import OperationBusyError, TransactionError
@@ -44,3 +46,19 @@ class OperationLock:
         if self._fd is not None:
             os.close(self._fd)
             self._fd = None
+
+    @asynccontextmanager
+    async def wait(self, *, timeout: float):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            try:
+                self.__enter__()
+                break
+            except OperationBusyError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.1)
+        try:
+            yield self
+        finally:
+            self.__exit__(None, None, None)

@@ -663,7 +663,7 @@ def test_transaction_detail_does_not_duplicate_switch_failure_dialog(window, mon
     from unittest.mock import Mock
 
     report = Mock()
-    monkeypatch.setattr(window, "_switch_failed", report)
+    monkeypatch.setattr(window, "_operation_failed", report)
     window._domain_event(
         SimpleNamespace(topic="switch.failed", payload={"alias": "example", "detail": "Failure"})
     )
@@ -1533,7 +1533,8 @@ def test_refresh_error_banner_clears_only_after_success(window):
 def test_nonmodal_feedback_keeps_errors_visible_and_success_ephemeral(window):
     window._switch_failed(RuntimeError("offline"))
     assert not window.notice.isHidden()
-    assert "offline" in window.notice_text.text()
+    assert "offline" not in window.notice_text.text()
+    assert "could not be completed" in window.notice_text.text()
     window._switch_done("Private account alias")
     assert window.notice.isHidden()
     assert not window.toast.isHidden()
@@ -1541,6 +1542,45 @@ def test_nonmodal_feedback_keeps_errors_visible_and_success_ephemeral(window):
     assert window.toast_timer.isActive()
     window.toast_timer.timeout.emit()
     assert window.toast.isHidden()
+
+
+def test_error_notice_expires_and_duplicate_does_not_resurrect_it(window):
+    from codex_account_manager.gui.i18n import language, set_language
+
+    previous = language()
+    try:
+        set_language("tr")
+        window._operation_failed("Codex has no signed-in account. Sign in again in Accounts.")
+        assert "yeniden giriş" in window.notice_text.text()
+        assert "signed-in" not in window.notice_text.text()
+        assert window._notice_timer.isActive()
+        window._notice_timer.timeout.emit()
+        assert window.notice.isHidden()
+        window._operation_failed("Codex has no signed-in account. Sign in again in Accounts.")
+        assert window.notice.isHidden()
+    finally:
+        set_language(previous)
+
+
+def test_new_continuation_notice_is_not_expired_by_old_error_timer(window):
+    window._operation_failed("technical failure")
+    window._continuation_issues["thread"] = "Needs attention"
+    assert window._show_continuation_issues()
+    assert not window._notice_timer.isActive()
+
+
+def test_runner_preserves_busy_error_for_automatic_refresh_retry(app):
+    from codex_account_manager.core.errors import OperationBusyError
+
+    runner = AsyncRunner()
+    received = []
+    try:
+        error = OperationBusyError("Another operation is in progress. Retry after it completes.")
+        runner._deliver_error(received.append, error)
+        assert received == [error]
+        assert isinstance(received[0], OperationBusyError)
+    finally:
+        runner.shutdown()
 
 
 def test_jobs_filter_clears_actions_and_shutdown_uses_selected_identity(window):
@@ -2241,3 +2281,13 @@ def test_account_controls_match_and_privacy_hides_email_search(window):
     assert not view.table.rows
     view.email_toggle.setChecked(False)
     assert list(view.table.rows) == ["Studio"]
+
+
+def test_automatic_failure_does_not_release_pending_manual_switch(window):
+    from codex_account_manager.core.events import Event
+
+    window._switching = True
+    window.dashboard.setEnabled(False)
+    window._domain_event(Event("switch.failed", {"detail": "rejected"}))
+    assert window._switching
+    assert not window.dashboard.isEnabled()

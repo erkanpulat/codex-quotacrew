@@ -30,7 +30,9 @@ async def test_successful_switch_commits(tmp_paths):
     assert store.read_active() == b'{"account":"new"}'
 
 
-async def test_revoked_target_is_rejected_before_stopping_desktop(tmp_paths, monkeypatch):
+async def test_revoked_target_is_rejected_before_stopping_desktop(
+    tmp_paths, migrated_db, monkeypatch
+):
     from unittest.mock import AsyncMock
 
     from codex_account_manager.accounts.service import AccountService

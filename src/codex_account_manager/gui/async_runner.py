@@ -19,6 +19,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from codex_account_manager.core.errors import AccountManagerError
 from codex_account_manager.core.redaction import redact_text
 
 
@@ -57,7 +58,7 @@ class AsyncRunner(QObject):
     def _deliver_error(self, errback: Callable[[Exception], object] | None, exc: Exception) -> None:
         if self._closing or isinstance(exc, concurrent.futures.CancelledError):
             return
-        safe = RuntimeError(redact_text(str(exc)))
+        safe = exc if isinstance(exc, AccountManagerError) else RuntimeError(redact_text(str(exc)))
         if errback is not None:
             try:
                 errback(safe)

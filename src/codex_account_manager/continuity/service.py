@@ -22,6 +22,7 @@ from codex_account_manager.core.errors import (
     AppServerError,
     HandoffDeferredError,
     LocalResponseTooLargeError,
+    SignInRequiredError,
 )
 from codex_account_manager.core.events import bus
 from codex_account_manager.core.logging import get_logger
@@ -143,7 +144,12 @@ class ContinuityService:
         adapter = CodexAppServer(paths.shared_codex_home, experimental=True)
         try:
             await adapter.start()
-            account_id = (await adapter.read_account()).account_id
+            try:
+                account_id = (await adapter.read_account()).account_id
+            except SignInRequiredError:
+                account_id = self.accounts.credentials.active_account_hint()
+                if not account_id:
+                    raise
             if not account_id:
                 await self.tracker.unverified()
                 bus.publish("work.observation_status", state="signed_out")
@@ -373,7 +379,9 @@ class ContinuityService:
         # Account activation refreshes an installed Desktop independently of
         # whether its automatic continuation is enabled. Surface preferences
         # control subsequent work, not credential verification or recovery.
-        tx = transaction or AuthTransaction()
+        tx = transaction or AuthTransaction(
+            lock_timeout=180 if reason == HandoffReason.MANUAL else 0
+        )
         try:
             result = await tx.switch(target, before_desktop_stop=before_desktop_stop)
         except (Exception, asyncio.CancelledError) as exc:
@@ -440,7 +448,11 @@ class ContinuityService:
         return account_id
 
     async def continue_on_limit(
-        self, target_alias: str, *, transaction: AuthTransaction | None = None
+        self,
+        target_alias: str,
+        *,
+        transaction: AuthTransaction | None = None,
+        reason: HandoffReason = HandoffReason.USAGE_LIMITED,
     ) -> SwitchResult:
         """Commit the account handoff before starting any verified interrupted work."""
         if self.automation.tasks:
@@ -496,7 +508,7 @@ class ContinuityService:
         try:
             result = await self.handoff(
                 target_alias,
-                reason=HandoffReason.USAGE_LIMITED,
+                reason=reason,
                 transaction=transaction,
                 before_desktop_stop=before_desktop_stop,
             )

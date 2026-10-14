@@ -21,6 +21,16 @@ def tr(message: str, **values: object) -> str:
     return translated.format(**values) if values else translated
 
 
+def error_message(message: str) -> str:
+    if "Sign in again in Accounts." in message:
+        return tr("Sign in again from My accounts. Your saved profile has been kept.")
+    if "Another operation is in progress" in message:
+        return tr("Another operation is in progress. Retry after it completes.")
+    if message in TR or message in EN:
+        return tr(message)
+    return tr("The operation could not be completed. See Activity or System check for details.")
+
+
 EN = {
     "SIGN IN": "Sign in",
     "STALE": "Stale",
@@ -58,6 +68,7 @@ EN = {
 }
 
 TR = {
+    "The operation could not be completed. See Activity or System check for details.": "İşlem tamamlanamadı. Ayrıntılar için Etkinlik veya Sistem Kontrolü bölümüne bakın.",
     "Subscription period recorded at sign-in: {date}. Renewal or cancellation is not confirmed.": "Giriş sırasında kaydedilen abonelik dönemi: {date}. Yenileme veya iptal durumu doğrulanmamıştır.",
     "Last checked: {date}": "Son kontrol: {date}",
     "Loading conversations…": "Konuşmalar yükleniyor…",
