@@ -240,6 +240,34 @@ async def test_ide_new_failed_turn_between_polls_is_tracked_but_history_is_not(
     assert not await service.tracker.limited("account-a")
 
 
+async def test_unowned_ide_thread_is_cooled_down_without_blocking_next_observation(
+    migrated_db, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.errors import OwnerNotFoundError
+    from codex_account_manager.storage.repositories import SettingsRepository
+
+    await SettingsRepository().set("ide_continue", "true")
+    info = replace(_thread("stale-ide", 100), source="vscode")
+    server = FakeAppServer(account_id="account-a", threads=[info])
+    server.is_desktop_thread = AsyncMock(return_value=False)
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_a, **_kw: server)
+    service = ContinuityService()
+    service.automation.ide.inspect = AsyncMock(
+        side_effect=OwnerNotFoundError("No local client owns this conversation.")
+    )
+
+    await service.observe_work()
+    assert "stale-ide" in await WorkTracker().cooling_down_ids()
+    await service.observe_work()
+
+    service.automation.ide.inspect.assert_awaited_once_with("stale-ide")
+    assert not service._restart_blockers
+    assert not service._unavailable_independent
+
+
 async def test_saved_work_cannot_cross_account_or_survive_new_goal(migrated_db):
     tracker = WorkTracker()
     old_goal = GoalInfo("thread", "Original", "active", True, 500, 10)

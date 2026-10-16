@@ -38,6 +38,7 @@ class ObservedWork:
     limited: bool
     observed_at: float
     verified: bool = True
+    unavailable_reason: str | None = None
 
 
 class WorkTracker:
@@ -64,7 +65,7 @@ class WorkTracker:
             rows = await (
                 await db.execute(
                     """SELECT thread_id, account_hash, turn_status, goal_fingerprint,
-                goal_status, limited, observed_at, verified FROM observed_work
+                goal_status, limited, observed_at, verified, unavailable_reason FROM observed_work
                 WHERE account_hash <> '' AND observed_at >= ?
                 ORDER BY observed_at DESC LIMIT 50""",
                     (time.time() - 86400,),
@@ -80,6 +81,7 @@ class WorkTracker:
                 limited=bool(row[5]),
                 observed_at=row[6],
                 verified=bool(row[7]) and 0 <= now - row[6] <= freshness,
+                unavailable_reason=row[8],
             )
             for row in rows
         ]
@@ -89,12 +91,17 @@ class WorkTracker:
             if thread_ids is None:
                 await db.execute("DELETE FROM observed_work")
                 await db.execute("DELETE FROM pending_continuations")
+                await db.execute("DELETE FROM conversation_cooldowns")
             else:
                 await db.executemany(
                     "DELETE FROM observed_work WHERE thread_id=?", [(tid,) for tid in thread_ids]
                 )
                 await db.executemany(
                     "DELETE FROM pending_continuations WHERE thread_id=?",
+                    [(tid,) for tid in thread_ids],
+                )
+                await db.executemany(
+                    "DELETE FROM conversation_cooldowns WHERE thread_id=?",
                     [(tid,) for tid in thread_ids],
                 )
             await db.commit()
@@ -106,6 +113,16 @@ class WorkTracker:
                 "DELETE FROM observed_work WHERE thread_id=?",
                 [(row[0],) for row in rows if row[0] not in listed_ids],
             )
+            if listed_ids:
+                cooldown_rows = await (
+                    await db.execute("SELECT thread_id FROM conversation_cooldowns")
+                ).fetchall()
+                await db.executemany(
+                    "DELETE FROM conversation_cooldowns WHERE thread_id=?",
+                    [(row[0],) for row in cooldown_rows if row[0] not in listed_ids],
+                )
+            else:
+                await db.execute("DELETE FROM conversation_cooldowns")
             await db.commit()
 
     async def unverified(self, thread_ids: list[str] | None = None) -> None:
@@ -117,6 +134,43 @@ class WorkTracker:
                     "UPDATE observed_work SET verified=0 WHERE thread_id=?",
                     [(tid,) for tid in thread_ids],
                 )
+            await db.commit()
+
+    async def cooling_down_ids(self, now: float | None = None) -> set[str]:
+        now = time.time() if now is None else now
+        async with connect() as db:
+            cooldown_rows = await (
+                await db.execute(
+                    "SELECT thread_id FROM conversation_cooldowns WHERE retry_after > ?",
+                    (now,),
+                )
+            ).fetchall()
+            observed_rows = await (
+                await db.execute(
+                    """SELECT thread_id FROM observed_work
+                    WHERE unavailable_reason IS NOT NULL AND unavailable_until > ?""",
+                    (now,),
+                )
+            ).fetchall()
+        return {row[0] for row in (*cooldown_rows, *observed_rows)}
+
+    async def mark_unavailable(
+        self, thread_id: str, reason: str, *, cooldown_seconds: float = 600
+    ) -> None:
+        async with connect() as db:
+            now = time.time()
+            await db.execute(
+                """INSERT INTO conversation_cooldowns
+                (thread_id, reason, retry_after, updated_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT(thread_id) DO UPDATE SET reason=excluded.reason,
+                retry_after=excluded.retry_after, updated_at=excluded.updated_at""",
+                (thread_id, reason, now + cooldown_seconds, now),
+            )
+            await db.execute(
+                """UPDATE observed_work SET verified=0, unavailable_reason=?,
+                unavailable_until=?, observed_at=? WHERE thread_id=?""",
+                (reason, now + cooldown_seconds, now, thread_id),
+            )
             await db.commit()
 
     async def ids(self, account_id: str | None = None) -> list[str]:
@@ -172,6 +226,7 @@ class WorkTracker:
                         await db.commit()
                     return
                 row = None
+            await db.execute("DELETE FROM conversation_cooldowns WHERE thread_id=?", (thread_id,))
             if (
                 row
                 and row[2] == "awaitingDesktop"
@@ -180,7 +235,8 @@ class WorkTracker:
                 and limited
             ):
                 await db.execute(
-                    "UPDATE observed_work SET observed_at=?, verified=1 WHERE thread_id=?",
+                    """UPDATE observed_work SET observed_at=?, verified=1,
+                    unavailable_reason=NULL, unavailable_until=NULL WHERE thread_id=?""",
                     (time.time(), thread_id),
                 )
                 await db.commit()
@@ -199,14 +255,16 @@ class WorkTracker:
                 await db.execute(
                     """INSERT INTO observed_work (
                     thread_id, account_hash, turn_id, turn_status, goal_fingerprint,
-                    goal_status, limited, observed_at, verified
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    goal_status, limited, observed_at, verified, unavailable_reason,
+                    unavailable_until
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL)
                     ON CONFLICT(thread_id) DO UPDATE SET
                     account_hash=excluded.account_hash,
                     turn_id=excluded.turn_id, turn_status=excluded.turn_status,
                     goal_fingerprint=excluded.goal_fingerprint, limited=excluded.limited,
                     goal_status=excluded.goal_status,
-                    observed_at=excluded.observed_at, verified=1""",
+                    observed_at=excluded.observed_at, verified=1,
+                    unavailable_reason=NULL, unavailable_until=NULL""",
                     (
                         thread_id,
                         source,
@@ -221,7 +279,8 @@ class WorkTracker:
             elif transition:
                 await db.execute(
                     """UPDATE observed_work SET turn_status=?, goal_status=?, limited=1,
-                    observed_at=?, verified=1
+                    observed_at=?, verified=1, unavailable_reason=NULL,
+                    unavailable_until=NULL
                     WHERE thread_id=?""",
                     (status, goal.status if goal else None, time.time(), thread_id),
                 )

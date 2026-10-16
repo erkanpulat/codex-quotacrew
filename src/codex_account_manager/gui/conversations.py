@@ -484,7 +484,9 @@ class ConversationsView(BaseView):
             values = (
                 title,
                 self._account_names.get(work.account_hash, tr("Unknown account")),
-                tr("Live state unavailable")
+                tr("Owner unavailable; retrying later")
+                if work.unavailable_reason == "owner_unavailable"
+                else tr("Live state unavailable")
                 if not work.verified
                 else tr("Waiting for Desktop continuation")
                 if work.turn_status == "awaitingDesktop"

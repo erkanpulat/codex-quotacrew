@@ -329,6 +329,7 @@ TR = {
     "Tracking cleared. Monitoring is paused.": "Takip temizlendi. İzleme duraklatıldı.",
     "Tracking could not be cleared. Try again.": "Takip temizlenemedi. Yeniden deneyin.",
     "Live state unavailable": "Canlı durum doğrulanamadı",
+    "Owner unavailable; retrying later": "Sohbet sahibi kullanılamıyor; daha sonra yeniden doğrulanacak",
     "Remove observation": "Takip kaydını kaldır",
     "{count} running": "{count} iş çalışıyor",
     "{count} saved observations could not be verified.": "{count} kayıtlı gözlem doğrulanamadı.",

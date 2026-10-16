@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7 — 2026-10-16
+
+- Stabilize Desktop continuation after restart and retain unavailable conversation checks without repeated polling.
+
 ## 0.2.6 — 2026-10-16
 
 - Support the current Codex Desktop app-tools channel during conversation tracking and continuation.

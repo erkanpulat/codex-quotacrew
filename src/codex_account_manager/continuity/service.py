@@ -23,6 +23,7 @@ from codex_account_manager.core.errors import (
     AppServerError,
     HandoffDeferredError,
     LocalResponseTooLargeError,
+    OwnerNotFoundError,
     SignInRequiredError,
 )
 from codex_account_manager.core.events import bus
@@ -168,7 +169,9 @@ class ContinuityService:
             )
             # Recheck work tracked before the account switch too.
             tracked = await self.tracker.ids()
+            cooling_down = await self.tracker.cooling_down_ids()
             selected = list(dict.fromkeys([*tracked, *(i.id for i in candidates[:20])]))
+            selected = [thread_id for thread_id in selected if thread_id not in cooling_down]
             sources = {i.id: i.source for i in candidates}
             for thread_id in tracked:
                 saved_thread = await self.threads.get(thread_id)
@@ -244,6 +247,14 @@ class ContinuityService:
                             checked += 1
                             completed.add(thread_id)
                             bus.publish("work.observed")
+                    except OwnerNotFoundError:
+                        # A stale local listing has no current owner. Keep the
+                        # history and retry after a cooldown, but do not block
+                        # account switching or re-probe it every poll.
+                        await self.tracker.mark_unavailable(thread_id, "owner_unavailable")
+                        completed.add(thread_id)
+                        unavailable += 1
+                        log.info("Conversation owner unavailable; retrying after cooldown.")
                     except Exception as exc:
                         unavailable += 1
                         log.warning(

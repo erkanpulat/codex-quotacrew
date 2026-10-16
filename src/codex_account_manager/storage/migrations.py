@@ -236,6 +236,24 @@ async def _pending_continuations(db: aiosqlite.Connection) -> None:
     """)
 
 
+async def _unavailable_work_state(db: aiosqlite.Connection) -> None:
+    columns = {
+        row[1] for row in await (await db.execute("PRAGMA table_info(observed_work)")).fetchall()
+    }
+    if "unavailable_reason" not in columns:
+        await db.execute("ALTER TABLE observed_work ADD COLUMN unavailable_reason TEXT")
+    if "unavailable_until" not in columns:
+        await db.execute("ALTER TABLE observed_work ADD COLUMN unavailable_until REAL")
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS conversation_cooldowns (
+            thread_id TEXT PRIMARY KEY,
+            reason TEXT NOT NULL,
+            retry_after REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )"""
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "initial application schema", _initial_schema),
     Migration(2, "durable automatic continuation attempts", _create_continuation_attempts),
@@ -244,6 +262,7 @@ MIGRATIONS: list[Migration] = [
     Migration(5, "normalize observed work schema", _normalize_observed_work),
     Migration(6, "separate saved observations from verified activity", _work_verification),
     Migration(7, "preserve prepared continuation across process exits", _pending_continuations),
+    Migration(8, "remember conversations awaiting revalidation", _unavailable_work_state),
 ]
 
 TARGET_VERSION = MIGRATIONS[-1].version

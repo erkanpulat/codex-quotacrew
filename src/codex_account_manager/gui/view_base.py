@@ -117,24 +117,6 @@ class EmptyState(QWidget):
         self.detail.setText(detail)
 
 
-def metric_card(title: str) -> tuple[QFrame, QLabel]:
-    card = QFrame()
-    card.setObjectName("MetricCard")
-    row = QHBoxLayout(card)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(6)
-    value = QLabel("0")
-    value.setObjectName("MetricValue")
-    value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    value.setMinimumWidth(18)
-    row.addWidget(value)
-    caption = QLabel(title)
-    caption.setObjectName("MetricCaption")
-    caption.setWordWrap(True)
-    row.addWidget(caption, 1)
-    return card, value
-
-
 def tooltip_item(text: str) -> QTableWidgetItem:
     item = QTableWidgetItem(text)
     item.setToolTip(text)

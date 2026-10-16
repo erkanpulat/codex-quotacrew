@@ -63,7 +63,12 @@ def decode_result(response: dict, request_id: str) -> dict:
     ):
         raise AppServerError("Desktop returned an unexpected response.")
     result = response.get("result")
-    if response.get("error") or not isinstance(result, dict) or result.get("success") is not True:
+    error = response.get("error")
+    if isinstance(error, dict) and "No ready app window supports app tools" in str(
+        error.get("message", "")
+    ):
+        raise ConnectionNotReadyError("Codex Desktop has not finished preparing its app channel.")
+    if error or not isinstance(result, dict) or result.get("success") is not True:
         raise AppServerError("Desktop rejected the native operation.")
     items = result.get("contentItems")
     if not isinstance(items, list):
@@ -213,7 +218,16 @@ class NativeDesktop:
             cancelled.set()
 
     async def latest_turn(self, thread_id: str) -> dict:
-        return read_snapshot(await self.call(thread_id, "account-manager-observation"), thread_id)
+        for attempt in range(3):
+            try:
+                return read_snapshot(
+                    await self.call(thread_id, "account-manager-observation"), thread_id
+                )
+            except ConnectionNotReadyError:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.75 * (2**attempt))
+        raise ConnectionNotReadyError("Codex Desktop app channel is not ready.")
 
     async def wait_latest_turn(self, thread_id: str, timeout: float = 20.0) -> dict:
         """Allow Desktop to initialize after restart; retry only read operations."""
@@ -232,7 +246,17 @@ class NativeDesktop:
             ) from exc
 
     async def send(self, thread_id: str, source_turn_id: str) -> dict:
-        result = await self.call(thread_id, source_turn_id, send=True)
+        # A restarted Desktop can expose its process before its app-tools window
+        # is ready. Retry only that explicit pre-delivery condition; other
+        # failures remain terminal and are never replayed.
+        for attempt in range(3):
+            try:
+                result = await self.call(thread_id, source_turn_id, send=True)
+                break
+            except ConnectionNotReadyError:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.75 * (2**attempt))
         if result.get("threadId") != thread_id:
             raise AppServerError("Desktop delivery receipt does not match the conversation.")
         return result

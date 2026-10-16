@@ -62,18 +62,7 @@ LIGHT = Palette(
     track="#e4e9f1",
 )
 
-SPACE = (0, 4, 8, 12, 16, 24, 32, 48)
 RADIUS = 10
-
-
-def usage_color(palette: Palette, percent: float | None) -> str:
-    if percent is None:
-        return palette.muted
-    if percent >= 90:
-        return palette.danger
-    if percent >= 70:
-        return palette.warning
-    return palette.primary
 
 
 def make_icon(name: str, color: str, size: int = 20) -> QIcon:

@@ -617,6 +617,11 @@ class ContinuationSupervisor:
                 or goal_signature(final_goal) != ticket.goal_signature
             ):
                 raise AppServerError("The goal changed during Desktop verification.")
+            if final_goal.status == "usageLimited":
+                await adapter.reactivate_usage_limited_goal(ticket.thread_id, final_goal)
+                final_goal = await adapter.get_goal(ticket.thread_id)
+                if final_goal is None or final_goal.status != "active":
+                    raise AppServerError("Could not restore the Desktop goal before continuation.")
             stage = "owner_busy"
             if owner_snapshot and (
                 owner_snapshot.blocked
