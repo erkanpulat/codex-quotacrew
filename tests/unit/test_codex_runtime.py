@@ -3,11 +3,15 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import psutil
 import pytest
 
+from codex_account_manager.codex import runtime
 from codex_account_manager.codex.runtime import codex_command
+from codex_account_manager.core.errors import AccountManagerError
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows command processor")
@@ -67,3 +71,36 @@ def test_batch_wrapper_rejects_shell_syntax(unsafe):
 
 def test_native_executable_keeps_arguments_literal():
     assert codex_command("a&b", executable="codex.exe") == ["codex.exe", "a&b"]
+
+
+@pytest.mark.parametrize("packaged", [True, False])
+def test_sandbox_elevation_is_blocked_only_for_packaged_installations(monkeypatch, packaged):
+    monkeypatch.setattr(runtime.package, "is_packaged", lambda: packaged)
+    find = Mock(return_value="codex.exe")
+    run = Mock(return_value=subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(runtime, "find_codex", find)
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    if packaged:
+        with pytest.raises(AccountManagerError, match="unavailable in the Microsoft Store edition"):
+            runtime.run_sandbox_setup_elevated("synthetic-profile")
+        find.assert_not_called()
+        run.assert_not_called()
+    else:
+        assert runtime.run_sandbox_setup_elevated("synthetic-profile") == 0
+        assert "-Verb RunAs" in run.call_args.args[0][-1]
+
+
+def test_store_sandbox_command_reports_a_readable_error(monkeypatch, capsys):
+    import typer
+
+    from codex_account_manager.cli import main as cli
+
+    monkeypatch.setattr(runtime.package, "is_packaged", lambda: True)
+    monkeypatch.setattr(cli, "_run", lambda value: value)
+    monkeypatch.setattr(
+        cli._accounts.profiles, "get_by_alias", lambda _: SimpleNamespace(codex_home="synthetic")
+    )
+    with pytest.raises(typer.Exit) as result:
+        cli.sandbox_setup("synthetic")
+    assert result.value.exit_code == 1
+    assert "Microsoft Store edition" in " ".join(capsys.readouterr().out.split())

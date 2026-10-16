@@ -12,6 +12,7 @@ from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.adapters.app_server import CodexAppServer
 from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.adapters.native_desktop import NativeDesktop, verified_desktop_turn
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.continuity.tracking import WorkTracker, goal_signature
 from codex_account_manager.core.paths import paths
 from codex_account_manager.domain.models import ProfileHealth
@@ -63,7 +64,7 @@ def all_accounts_limited(health: list[ProfileHealth], now: datetime) -> bool:
 def work_finished(target: PowerTarget, turn: dict | None, goal: GoalInfo | None) -> bool:
     if (
         not turn
-        or turn.get("status") != "completed"
+        or normalize_turn_status(turn.get("status")) != "completed"
         or goal is None
         or goal.thread_id != target.thread_id
     ):
@@ -184,7 +185,7 @@ class PowerChecks:
                 if (
                     not turn
                     or turn.get("blocked")
-                    or turn.get("status") != "inProgress"
+                    or normalize_turn_status(turn.get("status")) != "inProgress"
                     or goal is None
                 ):
                     raise ValueError("Select a verified running conversation first.")
@@ -222,7 +223,8 @@ class PowerChecks:
                     if (
                         not turn
                         or turn.get("blocked")
-                        or turn.get("status") not in {"completed", "failed", "interrupted"}
+                        or normalize_turn_status(turn.get("status"))
+                        not in {"completed", "failed", "interrupted"}
                     ):
                         return PowerEvidence(False, "Work is active or could not be verified.")
                     goal = await adapter.get_goal(thread_id)

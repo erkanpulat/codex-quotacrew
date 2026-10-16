@@ -124,7 +124,9 @@ async def test_expired_auth_can_check_idle_work_without_claiming_a_valid_login(
     assert service._work_verified
 
 
-async def test_health_cancellation_finishes_children_before_unlocking(migrated_db):
+async def test_health_cancellation_waits_for_children_without_blocking_account_operations(
+    migrated_db,
+):
     service = AccountService()
     profile = await service.create_profile("waiting")
     started = asyncio.Event()
@@ -145,12 +147,10 @@ async def test_health_cancellation_finishes_children_before_unlocking(migrated_d
     await asyncio.wait_for(started.wait(), 2)
     task.cancel()
     await asyncio.wait_for(cleanup.wait(), 2)
-    from codex_account_manager.core.errors import OperationBusyError
-
     try:
-        with pytest.raises(OperationBusyError):
-            with OperationLock(migrated_db.data_dir / "account-operation.lock"):
-                pass
+        assert not task.done()
+        with OperationLock(migrated_db.data_dir / "account-operation.lock"):
+            pass
     finally:
         proceed.set()
         with pytest.raises(asyncio.CancelledError):

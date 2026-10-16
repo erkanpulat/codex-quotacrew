@@ -90,7 +90,7 @@ def create_desktop_shortcut(*, destination: Path | None = None) -> Path:
         else:
             shortcut.SetPath(sys.executable)
             shortcut.SetWorkingDirectory(str(Path(sys.executable).parent))
-        shortcut.SetIconLocation(sys.executable, 0)
+            shortcut.SetIconLocation(sys.executable, 0)
         shortcut.SetDescription("QuotaCrew")
         shortcut.QueryInterface(pythoncom.IID_IPersistFile).Save(str(path), 1)
         return path

@@ -3,7 +3,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from codex_account_manager.core.errors import CodexNotFoundError
+from codex_account_manager.core.errors import AccountManagerError, CodexNotFoundError
+from codex_account_manager.platform import package
 
 
 def find_codex() -> str:
@@ -28,6 +29,11 @@ def profile_environment(codex_home: str | Path) -> dict[str, str]:
 
 
 def run_sandbox_setup_elevated(codex_home: str | Path) -> int:
+    if package.is_packaged():
+        raise AccountManagerError(
+            "Administrator sandbox setup is unavailable in the Microsoft Store edition. "
+            "Manage sandbox setup separately through the official Codex CLI."
+        )
     codex = find_codex()
 
     if Path(codex).suffix.lower() != ".exe":

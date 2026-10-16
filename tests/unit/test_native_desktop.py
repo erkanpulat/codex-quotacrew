@@ -169,7 +169,8 @@ def test_only_official_packaged_executable_path_is_trusted(path, valid):
 
 
 @pytest.mark.parametrize("fault", [None, "oversize", "short-write", "cancel-read", "untrusted"])
-def test_native_transport_bounds_and_closes_all_handles(monkeypatch, fault):
+@pytest.mark.parametrize("modern", [False, True])
+def test_native_transport_bounds_and_closes_all_handles(monkeypatch, fault, modern):
     import struct
     import sys
     import threading
@@ -207,10 +208,22 @@ def test_native_transport_bounds_and_closes_all_handles(monkeypatch, fault):
             return 258
         return 0
 
+    legacy = "codex-browser-use-" + "a" * 36
+    current = "codex-app-tools-" + "b" * 36
+    opened_paths = []
+
+    def open_pipe(path, *args):
+        opened_paths.append(path)
+        return handle
+
     monkeypatch.setattr(
         native,
         "os",
-        SimpleNamespace(name="nt", environ={}, listdir=lambda _: ["codex-browser-use-" + "a" * 36]),
+        SimpleNamespace(
+            name="nt",
+            environ={"CODEX_APP_TOOLS_PIPE_PATH": "\\\\.\\pipe\\" + legacy},
+            listdir=lambda _: [legacy, current] if modern else [legacy],
+        ),
     )
     monkeypatch.setattr(native, "_trusted_handle", lambda _: fault != "untrusted")
     monkeypatch.setitem(
@@ -236,7 +249,7 @@ def test_native_transport_bounds_and_closes_all_handles(monkeypatch, fault):
         sys.modules,
         "win32file",
         SimpleNamespace(
-            CreateFile=lambda *args: handle,
+            CreateFile=open_pipe,
             AllocateReadBuffer=bytearray,
             ReadFile=read,
             WriteFile=write,
@@ -250,6 +263,7 @@ def test_native_transport_bounds_and_closes_all_handles(monkeypatch, fault):
     else:
         assert REAL_EXCHANGE({"id": "request"}, token, 1)["id"] == "request"
     assert handle in closed
+    assert opened_paths[0] == "\\\\.\\pipe\\" + (current if modern else legacy)
 
 
 async def test_native_readiness_retries_reads_only():

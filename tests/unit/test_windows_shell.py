@@ -133,3 +133,21 @@ def test_msix_shortcut_uses_application_activation_identity(tmp_path, monkeypatc
     )
     shortcut.QueryInterface(pythoncom.IID_IPersistFile).Load(str(path))
     assert shortcut.GetIDList()
+    assert shortcut.GetIconLocation() == ("", 0)
+
+
+def test_frozen_standalone_shortcut_keeps_executable_icon(tmp_path, monkeypatch):
+    import pythoncom
+    from win32com.shell import shell
+
+    from codex_account_manager.core import windows_shell
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(windows_shell.package, "current_package", lambda: None)
+    path = windows_shell.create_desktop_shortcut(destination=tmp_path)
+    shortcut = pythoncom.CoCreateInstance(
+        shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink
+    )
+    shortcut.QueryInterface(pythoncom.IID_IPersistFile).Load(str(path))
+    assert shortcut.GetPath(0)[0] == sys.executable
+    assert shortcut.GetIconLocation() == (sys.executable, 0)

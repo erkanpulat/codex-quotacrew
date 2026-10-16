@@ -30,7 +30,7 @@ async def test_manual_handoff_switches_and_reconciles(migrated_db, monkeypatch):
     store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
     store.write_active_atomic(b"acc-1-auth")
 
-    # A tracked thread with a goal whose native goal is missing (should restore).
+    # Local notes must not recreate a missing native goal or reset its budget.
     goals = GoalService()
     await goals.set_objective("t1", "Finish the refactor")
 
@@ -51,8 +51,7 @@ async def test_manual_handoff_switches_and_reconciles(migrated_db, monkeypatch):
 
     assert result.success is True
     assert store.read_active() == b"{}"  # profile hesap2's auth is now active
-    # Goal was restored because native goal was missing and not user-cleared.
-    assert ("t1", "Finish the refactor") in fake.set_goal_calls
+    assert fake.set_goal_calls == []
     # Handoff recorded.
     handoffs = await service.recent_handoffs()
     assert handoffs and handoffs[0].success is True

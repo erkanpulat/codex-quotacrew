@@ -15,6 +15,7 @@ from codex_account_manager.adapters.credential_store import ProfileAuthSession
 from codex_account_manager.adapters.interfaces import CapabilitySet, GoalInfo, ServerInfo
 from codex_account_manager.adapters.subscription import subscription_period
 from codex_account_manager.codex.runtime import codex_command, profile_environment
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.core.child_process import (
     ChildProcessLifetime,
     finish_cleanup,
@@ -544,7 +545,11 @@ class CodexAppServer:
                     created_at=item.get("createdAt"),
                     updated_at=item.get("updatedAt"),
                     recency_at=item.get("recencyAt"),
-                    status=status.get("type") if isinstance(status, dict) else None,
+                    status=(
+                        normalize_turn_status(status.get("type"))
+                        if isinstance(status, dict)
+                        else None
+                    ),
                 )
             )
         return threads
@@ -621,7 +626,7 @@ class CodexAppServer:
         error = turn.get("error")
         return {
             "id": turn.get("id"),
-            "status": turn.get("status"),
+            "status": normalize_turn_status(turn.get("status")),
             "error": {"codexErrorInfo": error.get("codexErrorInfo")}
             if isinstance(error, dict)
             else None,
@@ -644,7 +649,7 @@ class CodexAppServer:
 
     async def observed_turn(self, thread_id: str) -> dict | None:
         turn = await self.latest_turn(thread_id)
-        if not turn or turn.get("status") != "interrupted":
+        if not turn or normalize_turn_status(turn.get("status")) != "interrupted":
             return turn
         result = await self._request("thread/read", {"threadId": thread_id, "includeTurns": False})
         thread = result.get("thread") or {}
@@ -721,7 +726,7 @@ class CodexAppServer:
                 raise AppServerError("Codex did not confirm the continuation turn.")
             if on_started is not None:
                 await on_started(turn_id)
-            if turn.get("status") in {"completed", "failed", "interrupted"}:
+            if normalize_turn_status(turn.get("status")) in {"completed", "failed", "interrupted"}:
                 finished = True
                 return turn
             while True:
@@ -733,7 +738,7 @@ class CodexAppServer:
                         raise AppServerError(
                             "The owned continuation turn could not be verified."
                         ) from None
-                    if current_turn.get("status") == "inProgress":
+                    if normalize_turn_status(current_turn.get("status")) == "inProgress":
                         continue
                     event = {"threadId": thread_id, "turn": current_turn}
                 if event.get("closed"):
@@ -746,7 +751,11 @@ class CodexAppServer:
                     )
                 completed = event.get("turn") or {}
                 if event.get("threadId") == thread_id and completed.get("id") == turn_id:
-                    if completed.get("status") not in {"completed", "failed", "interrupted"}:
+                    if normalize_turn_status(completed.get("status")) not in {
+                        "completed",
+                        "failed",
+                        "interrupted",
+                    }:
                         raise AppServerError("Codex returned an unknown continuation status.")
                     finished = True
                     return completed

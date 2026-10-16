@@ -12,6 +12,7 @@ from codex_account_manager.adapters.app_server import CodexAppServer
 from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.adapters.native_desktop import verified_desktop_turn
 from codex_account_manager.auth.transaction import AuthTransaction, SwitchResult
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.continuity.automation import (
     ContinuationSupervisor,
     ContinuationTicket,
@@ -213,7 +214,7 @@ class ContinuityService:
                             if (
                                 thread_id not in self._restart_independent
                                 and turn
-                                and turn.get("status") == "inProgress"
+                                and normalize_turn_status(turn.get("status")) == "inProgress"
                             ):
                                 self._work_running = True
                                 self._restart_blockers.add(thread_id)

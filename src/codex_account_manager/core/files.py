@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
 
 
 def restrict_access(path: Path) -> None:
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise OSError("Refusing to change permissions on a redirected data path.")
     if sys.platform == "win32":
+        import pywintypes
         import win32api
         import win32con
         import win32security
@@ -20,17 +25,27 @@ def restrict_access(path: Path) -> None:
         finally:
             token.Close()
         acl = win32security.ACL()
-        acl.AddAccessAllowedAce(win32security.ACL_REVISION, win32con.GENERIC_ALL, user)
-        win32security.SetNamedSecurityInfo(
-            str(path),
-            win32security.SE_FILE_OBJECT,
-            win32security.DACL_SECURITY_INFORMATION
-            | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            acl,
-            None,
+        inheritance = (
+            win32con.OBJECT_INHERIT_ACE | win32con.CONTAINER_INHERIT_ACE
+            if stat.S_ISDIR(info.st_mode)
+            else 0
         )
+        acl.AddAccessAllowedAceEx(
+            win32security.ACL_REVISION, inheritance, win32con.GENERIC_ALL, user
+        )
+        try:
+            win32security.SetNamedSecurityInfo(
+                str(path),
+                win32security.SE_FILE_OBJECT,
+                win32security.DACL_SECURITY_INFORMATION
+                | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                acl,
+                None,
+            )
+        except pywintypes.error as exc:
+            raise OSError("Could not protect local file permissions.") from exc
     else:
         path.chmod(0o700 if path.is_dir() else 0o600)
 

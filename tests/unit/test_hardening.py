@@ -22,6 +22,22 @@ from tests.unit.test_auth_transaction import _profile
 from tests.unit.test_policy import _health
 
 
+def test_cli_reports_startup_permission_failure_without_raw_error(monkeypatch):
+    from typer.testing import CliRunner
+
+    from codex_account_manager.cli import main as cli
+
+    def denied():
+        raise OSError("synthetic private filesystem detail")
+
+    monkeypatch.setattr(cli, "configure_logging", denied)
+    result = CliRunner().invoke(cli.app, ["status"])
+    assert result.exit_code == 1
+    assert "permissions" in result.output.lower()
+    assert "synthetic private filesystem detail" not in result.output
+    assert isinstance(result.exception, SystemExit)
+
+
 @pytest.mark.parametrize("alias", ["", "  ", "a" * 65, "bad\nname", "bad\x00name"])
 async def test_reject_invalid_profile_names(migrated_db, alias):
     with pytest.raises(ValueError):
@@ -263,7 +279,7 @@ def test_credential_file_permissions(tmp_path):
         assert os.stat(path).st_mode & 0o077 == 0
 
 
-async def test_goal_cannot_be_cleared_during_native_restore(migrated_db):
+async def test_goal_cannot_be_cleared_during_native_reconciliation(migrated_db):
     from codex_account_manager.adapters.interfaces import GoalInfo
 
     started = asyncio.Event()
@@ -272,19 +288,21 @@ async def test_goal_cannot_be_cleared_during_native_restore(migrated_db):
     await service.set_objective("thread", "Objective")
 
     class SlowAdapter(FakeAppServer):
-        async def set_goal(self, thread_id, objective):
+        async def get_goal(self, thread_id):
             started.set()
             await finish.wait()
-            return GoalInfo(thread_id=thread_id, objective=objective, status="active", present=True)
+            return GoalInfo(
+                thread_id=thread_id, objective="Objective", status="active", present=True
+            )
 
     task = asyncio.create_task(service.reconcile_after_resume("thread", SlowAdapter()))
-    await started.wait()
     try:
+        await asyncio.wait_for(started.wait(), timeout=5)
         with pytest.raises(TransactionError):
             await service.user_clear("thread")
     finally:
         finish.set()
-        await task
+        await asyncio.wait_for(task, timeout=5)
     await service.user_clear("thread")
     assert (await service.get("thread")).user_cleared
 
@@ -388,47 +406,6 @@ def test_packaged_and_protocol_versions_match_project_metadata():
     assert f'#define AppVersion "{__version__}"' in Path("packaging/installer.iss").read_text(
         "utf-8"
     )
-
-
-def test_data_directory_resolves_redirected_filesystem_location(tmp_path, monkeypatch):
-    import importlib
-    from pathlib import Path
-
-    module = importlib.import_module("codex_account_manager.core.paths")
-    requested = tmp_path / "apparent" / "CodexAccountManager"
-    physical = tmp_path / "package-cache" / "CodexAccountManager"
-    resolve = Path.resolve
-
-    def resolved(path, *args, **kwargs):
-        return physical if path == requested else resolve(path, *args, **kwargs)
-
-    monkeypatch.setattr(module, "user_data_dir", lambda *args, **kwargs: str(requested))
-    monkeypatch.setattr(Path, "resolve", resolved)
-    paths = module._resolve.__wrapped__()
-    assert paths.data_dir == physical
-    assert paths.db_path == physical / "accounts.db"
-    assert paths.profiles_dir == physical / "profiles"
-
-
-def test_database_file_redirection_is_visible_even_when_parent_is_not_redirected(
-    tmp_path, monkeypatch
-):
-    import importlib
-    from pathlib import Path
-
-    module = importlib.import_module("codex_account_manager.core.paths")
-    folder = tmp_path / "CodexAccountManager"
-    physical_db = tmp_path / "package-cache" / "accounts.db"
-    resolve = Path.resolve
-
-    def resolved(path, *args, **kwargs):
-        return physical_db if path == folder / "accounts.db" else resolve(path, *args, **kwargs)
-
-    monkeypatch.setattr(module, "user_data_dir", lambda *args, **kwargs: str(folder))
-    monkeypatch.setattr(Path, "resolve", resolved)
-    paths = module._resolve.__wrapped__()
-    assert paths.data_dir == folder
-    assert paths.db_path == physical_db
 
 
 async def test_diagnostic_event_retention_preserves_recent_history(migrated_db, monkeypatch):

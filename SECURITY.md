@@ -12,13 +12,13 @@ Include the affected version, platform, reproduction steps using synthetic data,
 
 On Windows, QuotaCrew uses current-user DPAPI for managed profile credentials (`auth.dpapi`) and durable switch recovery snapshots. Encryption is round-trip verified before a plaintext profile is removed; errors never silently fall back to plaintext. The official Codex process uses a temporary restricted `auth.json`; after the process exits, the latest token is sealed. The active shared Codex file remains plaintext for compatibility. SQLite metadata/backups are not encrypted. Non-Windows source installations retain the file-permission model. Token-shaped text and email addresses are redacted from logs, including tracebacks, while diagnostic exports omit raw text entirely.
 
-Recovery snapshots intentionally contain credentials and are excluded from exports and Git. SQLite stores account identifiers and conversation metadata but is not a credential store. Verified account emails are held in memory for optional display; they are omitted from snapshot representations and diagnostic exports.
+Recovery snapshots intentionally contain credentials and are excluded from exports and Git. SQLite stores account identifiers, conversation titles/previews, workspace paths and saved local goal notes, but is not the Codex sign-in credential store. Cached text and user-written notes can contain sensitive information and remain unencrypted. Verified account emails are held in memory for optional display; they are omitted from snapshot representations and diagnostic exports.
 
 Passing tests and scanners does not guarantee the absence of every vulnerability.
 
 ## Trust boundaries and limitations
 
-QuotaCrew is a local desktop utility operating with the current user's permissions. Its main sensitive operations are copying Codex credentials, changing the shared auth-store setting, starting/stopping the packaged Desktop, and restoring a native goal from an explicit local checkpoint.
+QuotaCrew is a local desktop utility operating with the current user's permissions. Its main sensitive operations are copying Codex credentials, changing the shared auth-store setting, starting/stopping the packaged Desktop, and requesting continuation of verified quota-interrupted conversations. Local goal notes do not recreate native goals or reset their budgets.
 
 ### Protected boundaries
 
@@ -36,13 +36,14 @@ QuotaCrew is a local desktop utility operating with the current user's permissio
 
 ## Updates and CLI setup
 
-Automatic update checks contact the fixed public GitHub repository with the
+In direct-download copies, automatic update checks contact the fixed public GitHub repository with the
 application version as User-Agent; no accounts, tokens or conversation content
 are sent. Users can disable checks. Installers are downloaded only on request,
 limited to 512 MiB and verified against release asset size and SHA-256. HTTPS
 redirects are restricted to GitHub asset hosts. Digests share the repository's
 trust boundary and do not replace code signing. Uncertain native continuation
 delivery remains unrelated to updater retries.
+MSIX copies use Microsoft Store updates and cannot install GitHub EXE updates.
 
 First-run CLI setup requires a separate affirmative confirmation. It executes
 OpenAI's official HTTPS Windows installer in noninteractive mode, preserves an

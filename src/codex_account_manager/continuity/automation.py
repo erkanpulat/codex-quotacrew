@@ -23,6 +23,7 @@ from codex_account_manager.adapters.app_server import CodexAppServer
 from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.adapters.native_desktop import NativeDesktop, verified_desktop_turn
 from codex_account_manager.adapters.native_ide import NativeIDE, OwnerSnapshot
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.continuity.tracking import WorkTracker, goal_signature
 from codex_account_manager.core.errors import (
     AppServerError,
@@ -75,10 +76,11 @@ def has_verified_limit_turn(turn: dict | None, goal: GoalInfo | None) -> bool:
     if not turn or not goal_allows_continuation(goal):
         return False
     error = turn.get("error")
-    if turn.get("status") == "failed":
+    status = normalize_turn_status(turn.get("status"))
+    if status == "failed":
         return isinstance(error, dict) and error.get("codexErrorInfo") == "usageLimitExceeded"
     return bool(
-        turn.get("status") == "completed"
+        status == "completed"
         and goal is not None
         and goal.present
         and goal.status == "usageLimited"
@@ -133,7 +135,7 @@ class ContinuationSupervisor:
             await self.ide.wait_inspect(thread_id) if wait else await self.ide.inspect(thread_id)
         )
         turn = owner.turn
-        if turn.get("status") == "failed":
+        if normalize_turn_status(turn.get("status")) == "failed":
             stored = await adapter.latest_turn(thread_id)
             if not stored or stored.get("id") != turn.get("id") or stored.get("status") != "failed":
                 raise AppServerError("The IDE failure does not match the stored turn.")
@@ -407,7 +409,7 @@ class ContinuationSupervisor:
                 if (
                     not latest
                     or latest["id"] != ticket.turn_id
-                    or latest.get("status") not in {"failed", "completed"}
+                    or normalize_turn_status(latest.get("status")) not in {"failed", "completed"}
                 ):
                     raise AppServerError(
                         "Conversation changed; automatic continuation was skipped."
@@ -451,7 +453,8 @@ class ContinuationSupervisor:
                     message_id,
                     on_started=started,
                 )
-                status = completed.get("status")
+                status = normalize_turn_status(completed.get("status"))
+                completed = {**completed, "status": status}
                 if status not in {"completed", "failed", "interrupted"}:
                     raise AppServerError("Codex returned an invalid turn result.")
                 await self._record(ticket, str(status))
@@ -583,7 +586,10 @@ class ContinuationSupervisor:
                             owner = await self.ide.inspect(thread.id)
                         except OwnerNotFoundError:
                             continue
-                        if owner.blocked or owner.turn.get("status") == "inProgress":
+                        if (
+                            owner.blocked
+                            or normalize_turn_status(owner.turn.get("status")) == "inProgress"
+                        ):
                             raise AppServerError(
                                 "IDE refresh is waiting for other conversations or approvals."
                             )
@@ -596,7 +602,9 @@ class ContinuationSupervisor:
                     raise AppServerError("The IDE conversation changed during refresh.")
             # Re-read just before the durable claim; never steer a known running turn.
             current = await latest_turn()
-            if current.get("id") != ticket.turn_id or current.get("status") != latest.get("status"):
+            if current.get("id") != ticket.turn_id or normalize_turn_status(
+                current.get("status")
+            ) != normalize_turn_status(latest.get("status")):
                 raise AppServerError("The Desktop conversation is no longer idle.")
             if not await self.enabled() or not await self._local_allows(ticket.thread_id):
                 return
@@ -657,7 +665,7 @@ class ContinuationSupervisor:
                                 limited=has_verified_limit_turn(turn, observed_goal),
                             )
                             bus.publish("work.observed")
-                        if turn.get("status") in {"failed", "interrupted"}:
+                        if normalize_turn_status(turn.get("status")) in {"failed", "interrupted"}:
                             error = turn.get("error")
                             if isinstance(error, dict) and re.search(
                                 r"\b401\b", str(error.get("message", ""))

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -64,6 +67,14 @@ class AboutView(BaseView):
             lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(policy_path())))
         )
         layout.addWidget(privacy)
+        licenses = QPushButton(tr("Open-source licenses (Qt / PySide6 · LGPL-3.0)"))
+        notices = (
+            Path(vars(sys)["_MEIPASS"]) / "licenses/THIRD_PARTY_NOTICES.md"
+            if getattr(sys, "frozen", False)
+            else Path(__file__).resolve().parents[3] / "THIRD_PARTY_NOTICES.md"
+        )
+        licenses.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(notices))))
+        layout.addWidget(licenses)
         for title, description in (
             (
                 tr("What does it do?"),
@@ -105,6 +116,12 @@ class AboutView(BaseView):
                 tr("Where is my information stored?"),
                 tr(
                     "Account credentials and settings are stored locally. This application has no telemetry or credential proxy. Codex connects to OpenAI for sign-in and account information. Diagnostic exports include check statuses, the CLI version and profile count. They exclude account labels, local paths, credentials and conversation content."
+                ),
+            ),
+            (
+                tr("Uninstalling and removing local data"),
+                tr(
+                    "Uninstalling QuotaCrew keeps saved accounts, settings and backups on this PC. A separately installed Codex CLI and its PATH entry also remain. See Help → Privacy policy for removal instructions."
                 ),
             ),
             (

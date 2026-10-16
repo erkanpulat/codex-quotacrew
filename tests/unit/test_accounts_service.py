@@ -242,17 +242,22 @@ async def test_confirmed_signed_out_shared_home_does_not_block_saved_accounts(
 
 
 async def test_health_cannot_race_with_switch_or_login(migrated_db):
-    from codex_account_manager.core.errors import OperationBusyError
     from codex_account_manager.core.operation_lock import OperationLock
+    from tests.fakes import FakeAppServer
 
-    def unexpected(home):
-        pytest.fail("Health reads must wait for account mutations")
+    calls = []
 
-    service = AccountService(app_server_factory=unexpected)
+    def factory(home):
+        calls.append(home)
+        return FakeAppServer()
+
+    service = AccountService(app_server_factory=factory)
     await service.create_profile("work")
     with OperationLock(migrated_db.data_dir / "account-operation.lock"):
-        with pytest.raises(OperationBusyError):
-            await service.all_health()
+        health = await service.all_health()
+    assert len(health) == 1
+    assert health[0].error is None
+    assert calls
 
 
 async def test_same_home_reads_cannot_rotate_tokens_concurrently(migrated_db):

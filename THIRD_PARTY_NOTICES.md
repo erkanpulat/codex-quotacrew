@@ -37,12 +37,13 @@ reverse-engineer the application to debug those modifications. The application
 source and build instructions are provided in this repository; rebuild it with
 your modified dependency if required. Direct-download EXE distributions do not
 lock replacement of these libraries through package signing.
-For MSIX distributions, compatible modified builds can be produced from the
-published source and installed separately using the developer's own signing
-identity. The packaged installation is protected by Windows package integrity;
-editing libraries inside a Store-installed package is not supported. The
-availability and sufficiency of the corresponding-source and installation
-instructions must be reviewed before the first Store submission.
+MSIX distributions include complete Qt/PySide/Shiboken source archives in
+`Sources` and replacement instructions in `LGPL-INSTALLATION.md`. Copy the
+installed payload to a writable directory and run it with compatible modified
+libraries, without a publisher signing key. The original Store installation
+remains protected by Windows package integrity. The separate executable copy
+uses standalone startup and update behavior; use a separate Windows test user
+to keep your production profiles isolated.
 
 Python and the PyInstaller bootloader retain their own licenses, included in
 the same notice file. The bootloader's exception permits distributing this app

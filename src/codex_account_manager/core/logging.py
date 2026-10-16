@@ -42,7 +42,7 @@ def configure_logging(level: str = "INFO", *, to_stderr: bool = False) -> None:
         logging.getLogger().setLevel(level.upper())
         return
 
-    paths.logs_dir.mkdir(parents=True, exist_ok=True)
+    paths.ensure()
     log_file: Path = paths.logs_dir / "account-manager.log"
 
     root = logging.getLogger()

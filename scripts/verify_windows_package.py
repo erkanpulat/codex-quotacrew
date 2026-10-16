@@ -10,6 +10,7 @@ import tempfile
 import time
 from contextlib import closing
 from pathlib import Path
+from xml.etree import ElementTree
 
 
 def main() -> None:
@@ -37,6 +38,17 @@ def main() -> None:
     executable = Path(args.executable).resolve(strict=True)
     from codex_account_manager import __version__
 
+    module = win32api.LoadLibraryEx(str(executable), 0, win32con.LOAD_LIBRARY_AS_DATAFILE)
+    try:
+        manifest = ElementTree.fromstring(win32api.LoadResource(module, 24, 1))
+    finally:
+        win32api.FreeLibrary(module)
+    dpi = manifest.find(".//{http://schemas.microsoft.com/SMI/2016/WindowsSettings}dpiAwareness")
+    if dpi is None or dpi.text != "PerMonitorV2":
+        raise RuntimeError("The GUI executable must declare PerMonitorV2 DPI awareness.")
+    execution = manifest.find(".//{urn:schemas-microsoft-com:asm.v3}requestedExecutionLevel")
+    if execution is None or execution.get("level") != "asInvoker":
+        raise RuntimeError("The GUI executable must run without requesting elevation.")
     for key, expected in (
         ("ProductName", "QuotaCrew for Codex"),
         ("FileDescription", "QuotaCrew"),

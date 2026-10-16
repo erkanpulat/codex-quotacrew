@@ -16,9 +16,9 @@ log = get_logger(__name__)
 
 
 def run_gui() -> int:
-    configure_logging()
-    log.info("QuotaCrew started (pid=%d).", os.getpid())
     try:
+        configure_logging()
+        log.info("QuotaCrew started (pid=%d).", os.getpid())
         asyncio.run(initialize_database())
     except AccountRecoveryRequired:
         from PySide6.QtCore import QLocale
@@ -34,6 +34,17 @@ def run_gui() -> int:
             tr(
                 "Saved sign-in files exist, but the account list is missing. Startup was stopped to protect your data. Do not reset or delete the data folder. Restore the account database from a verified backup."
             ),
+        )
+        return 1
+    except OSError:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.critical(
+            None,
+            "QuotaCrew",
+            "Local data could not be accessed or protected. Close other account operations and check the data folder permissions. Do not delete your account data.\n\n"
+            "Yerel verilere erişilemedi veya veriler korunamadı. Diğer hesap işlemlerini kapatıp veri klasörünün izinlerini kontrol edin. Hesap verilerinizi silmeyin.",
         )
         return 1
     from codex_account_manager.auth.transaction import AuthTransaction

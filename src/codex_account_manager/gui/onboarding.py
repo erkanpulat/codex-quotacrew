@@ -234,6 +234,14 @@ class SetupDialog(QDialog):
         self.summary = label("", "Body")
         self.summary.setWordWrap(True)
         summary.addWidget(self.summary)
+        retention = label(
+            tr(
+                "Uninstalling QuotaCrew keeps saved accounts, settings and backups on this PC. A separately installed Codex CLI and its PATH entry also remain. See Help → Privacy policy for removal instructions."
+            ),
+            "Muted",
+        )
+        retention.setWordWrap(True)
+        summary.addWidget(retention)
         from codex_account_manager.gui.shortcuts import ShortcutPanel
 
         summary.addWidget(ShortcutPanel(runner))

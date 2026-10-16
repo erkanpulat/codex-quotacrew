@@ -1,3 +1,8 @@
+from unittest.mock import AsyncMock
+
+import pytest
+
+from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.domain.states import GoalState
 from codex_account_manager.goals.service import GoalService
 from tests.fakes import FakeAppServer
@@ -20,13 +25,38 @@ async def test_set_objective_bumps_revision(migrated_db):
     assert g2.objective == "v2"
 
 
-async def test_reconcile_restores_missing_native_goal(migrated_db):
+async def test_local_note_does_not_create_missing_native_goal(migrated_db):
     svc = GoalService()
     await svc.set_objective("t1", "Keep going")
-    adapter = FakeAppServer(goals={"t1": None})  # native goal missing
+    adapter = FakeAppServer(goals={"t1": None})
     result = await svc.reconcile_after_resume("t1", adapter)
-    assert result.action == "restored"
-    assert ("t1", "Keep going") in adapter.set_goal_calls
+    assert result.action == "blocked"
+    assert (await svc.get("t1")).local_status == GoalState.NEEDS_USER
+    assert adapter.set_goal_calls == []
+
+
+@pytest.mark.parametrize("tokens_used", [40, 100])
+async def test_missing_goal_does_not_reset_native_budget(migrated_db, tokens_used):
+    svc = GoalService()
+    await svc.set_objective("t1", "Local note")
+    adapter = FakeAppServer()
+    adapter.get_goal = AsyncMock(
+        return_value=GoalInfo(
+            thread_id="t1",
+            objective="Native goal",
+            status="active",
+            present=True,
+            token_budget=100,
+            tokens_used=tokens_used,
+        )
+    )
+    await svc.reconcile_after_resume("t1", adapter)
+    adapter.get_goal.return_value = GoalInfo(
+        thread_id="t1", objective=None, status=None, present=False
+    )
+    result = await svc.reconcile_after_resume("t1", adapter)
+    assert result.action == "blocked"
+    assert adapter.set_goal_calls == []
 
 
 async def test_reconcile_skips_user_cleared_goal(migrated_db):
@@ -58,8 +88,6 @@ async def test_reconcile_no_action_when_native_present(migrated_db):
 
 
 async def test_unknown_native_state_is_not_reported_missing(migrated_db):
-    from unittest.mock import AsyncMock
-
     svc = GoalService()
     await svc.set_objective("t1", "Local note")
     adapter = FakeAppServer()
@@ -71,10 +99,6 @@ async def test_unknown_native_state_is_not_reported_missing(migrated_db):
 
 
 async def test_native_budget_limit_is_preserved_even_if_later_missing(migrated_db):
-    from unittest.mock import AsyncMock
-
-    from codex_account_manager.adapters.interfaces import GoalInfo
-
     svc = GoalService()
     await svc.set_objective("t1", "Local note")
     adapter = FakeAppServer()

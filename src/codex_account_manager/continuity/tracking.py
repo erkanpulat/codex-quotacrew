@@ -9,6 +9,7 @@ from hashlib import sha256
 from typing import ClassVar
 
 from codex_account_manager.adapters.interfaces import GoalInfo
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.storage.database import connect
 
 
@@ -153,7 +154,7 @@ class WorkTracker:
             if generation is not None and generation != WorkTracker.generation:
                 return
             source = account_hash(account_id)
-            status = turn.get("status") if turn else None
+            status = normalize_turn_status(turn.get("status")) if turn else None
             turn_id = turn.get("id") if turn else None
             signature = goal_signature(goal) if goal is not None else None
             if row and row[0] != source:

@@ -22,6 +22,7 @@ from codex_account_manager.adapters.native_desktop import (
     _trusted_handle,
 )
 from codex_account_manager.adapters.windows_pipe import FramedPipe
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.core.errors import (
     AppServerError,
     ConnectionNotReadyError,
@@ -74,7 +75,8 @@ def snapshot(message: dict, thread_id: str, owner_id: str) -> OwnerSnapshot:
     if not isinstance(turns, list) or not turns or not isinstance(turns[-1], dict):
         raise AppServerError("The IDE conversation has no verifiable turn.")
     latest = turns[-1]
-    turn_id, status = latest.get("turnId"), latest.get("status")
+    turn_id = latest.get("turnId")
+    status = normalize_turn_status(latest.get("status"))
     if (
         not isinstance(turn_id, str)
         or not IDENTIFIER.fullmatch(turn_id)
@@ -208,7 +210,7 @@ class OwnerProtocol:
         current = self.inspect(thread_id, expected.owner_id)
         if current.blocked or current.turn != expected.turn or current.goal != expected.goal:
             raise AppServerError("The IDE conversation changed before continuation.")
-        if current.turn.get("status") not in {"failed", "completed"}:
+        if normalize_turn_status(current.turn.get("status")) not in {"failed", "completed"}:
             raise AppServerError("The IDE conversation is not idle.")
         reply = self.request(
             "thread-follower-start-turn",
@@ -236,7 +238,7 @@ class OwnerProtocol:
             or not IDENTIFIER.fullmatch(turn["id"])
         ):
             raise AppServerError("IDE continuation delivery is unconfirmed.")
-        return {"id": turn["id"], "status": turn.get("status")}
+        return {"id": turn["id"], "status": normalize_turn_status(turn.get("status"))}
 
 
 def _exchange(

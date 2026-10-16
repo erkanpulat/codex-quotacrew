@@ -112,9 +112,7 @@ class GoalsView(BaseView):
             QMessageBox.question(
                 self,
                 tr("Clear checkpoint"),
-                tr(
-                    "Clear this local checkpoint? It will no longer be restored automatically. Native Codex goals are unchanged."
-                ),
+                tr("Clear this local goal note? Native Codex goals are unchanged."),
             )
             == QMessageBox.StandardButton.Yes
         ):

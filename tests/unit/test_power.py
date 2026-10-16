@@ -150,6 +150,13 @@ def test_goal_completion_must_match_original_objective_and_budget():
     assert not work_finished(target, turn, None)
 
 
+@pytest.mark.parametrize("status", ["completed", "complete", "success"])
+def test_shutdown_completion_accepts_codex_status_variants(status):
+    goal = GoalInfo("a", None, None, False)
+    target = PowerTarget("work", "a", None, "turn-1")
+    assert work_finished(target, {"id": "turn-1", "status": status}, goal)
+
+
 def test_without_goal_selected_conversation_completes_after_handoff():
     target = PowerTarget("work", "a", None, "turn-1")
     goal = GoalInfo("a", None, None, False)

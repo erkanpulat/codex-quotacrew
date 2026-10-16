@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6 — 2026-10-16
+
+- Support the current Codex Desktop app-tools channel during conversation tracking and continuation.
+
 ## 0.2.5 — 2026-10-14
 
 - Keep rejected sign-ins out of automatic selection until their saved credentials change.

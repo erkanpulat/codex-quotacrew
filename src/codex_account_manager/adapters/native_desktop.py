@@ -28,6 +28,7 @@ import threading
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.core.errors import (
     AppServerError,
     ConnectionNotReadyError,
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from codex_account_manager.adapters.app_server import CodexAppServer
 
 MAX_FRAME = 1024 * 1024
-PIPE_NAME = re.compile(r"codex-browser-use-[0-9a-f-]{36}", re.I)
+PIPE_NAME = re.compile(r"codex-(?:app-tools|browser-use)-[0-9a-f-]{36}", re.I)
 # Restrict connections to the expected installed MSIX package path.
 DESKTOP_EXECUTABLE = re.compile(
     r"[a-z]:\\Program Files\\WindowsApps\\OpenAI\.Codex_[0-9.]+_"
@@ -91,10 +92,11 @@ def read_snapshot(data: dict, thread_id: str) -> dict:
         or not isinstance(turns[0], dict)
         or not isinstance(turns[0].get("id"), str)
         or not IDENTIFIER.fullmatch(turns[0]["id"])
-        or turns[0].get("status") not in {"inProgress", "completed", "failed", "interrupted"}
+        or normalize_turn_status(turns[0].get("status"))
+        not in {"inProgress", "completed", "failed", "interrupted"}
     ):
         raise AppServerError("Desktop conversation identity could not be verified.")
-    return turns[0]
+    return {**turns[0], "status": normalize_turn_status(turns[0].get("status"))}
 
 
 def _trusted_handle(handle) -> bool:
@@ -134,7 +136,11 @@ def _exchange(payload: dict, cancelled: threading.Event, timeout: float) -> dict
     inherited = os.environ.get("CODEX_APP_TOOLS_PIPE_PATH", "")
     if inherited.startswith(prefix) and PIPE_NAME.fullmatch(inherited[len(prefix) :]):
         candidates.append(inherited)
-    candidates.extend(prefix + name for name in os.listdir(prefix) if PIPE_NAME.fullmatch(name))
+    discovered = [name for name in os.listdir(prefix) if PIPE_NAME.fullmatch(name)]
+    # New Desktop versions expose app tools separately from browser automation.
+    discovered.sort(key=lambda name: not name.lower().startswith("codex-app-tools-"))
+    candidates.extend(prefix + name for name in discovered)
+    candidates.sort(key=lambda path: not path.lower().startswith(prefix + "codex-app-tools-"))
     if len(set(candidates)) > 16:
         raise AppServerError("Too many Desktop channels; identity is ambiguous.")
     handle = None
@@ -237,13 +243,17 @@ async def verified_desktop_turn(
 ) -> dict:
     turn = await native.wait_latest_turn(thread_id) if wait else await native.latest_turn(thread_id)
     error = turn.get("error")
-    if turn.get("status") != "failed" or (
+    if normalize_turn_status(turn.get("status")) != "failed" or (
         isinstance(error, dict) and error.get("codexErrorInfo") is not None
     ):
         return turn
     # Desktop summaries omit the structured error. Accept it only from the same
     # stored turn; matching human-readable messages cannot establish a quota failure.
     stored = await adapter.latest_turn(thread_id)
-    if not stored or stored.get("id") != turn.get("id") or stored.get("status") != "failed":
+    if (
+        not stored
+        or stored.get("id") != turn.get("id")
+        or normalize_turn_status(stored.get("status")) != "failed"
+    ):
         raise AppServerError("The Desktop failure could not be matched to its stored turn.")
     return {**turn, "error": stored.get("error")}

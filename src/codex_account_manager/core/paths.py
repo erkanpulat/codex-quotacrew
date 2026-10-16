@@ -8,6 +8,8 @@ from pathlib import Path
 
 from platformdirs import user_data_dir
 
+from codex_account_manager.core.files import restrict_access
+
 APP_NAME = "CodexAccountManager"
 
 
@@ -31,13 +33,21 @@ class Paths:
             self.backups_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
+            restrict_access(directory)
+        for profile in self.profiles_dir.iterdir():
+            if profile.is_dir():
+                restrict_access(profile)
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            database_file = self.db_path.with_name(self.db_path.name + suffix)
+            if database_file.exists() or database_file.is_symlink():
+                restrict_access(database_file)
         return self
 
 
 @lru_cache(maxsize=1)
 def _resolve() -> Paths:
-    data_dir = Path(user_data_dir(APP_NAME, appauthor=False)).resolve()
-    database = (data_dir / "accounts.db").resolve()
+    data_dir = Path(user_data_dir(APP_NAME, appauthor=False)).absolute()
+    database = data_dir / "accounts.db"
     return Paths(
         data_dir=data_dir,
         db_path=database,

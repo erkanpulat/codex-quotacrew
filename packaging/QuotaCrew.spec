@@ -3,7 +3,9 @@ import sys
 import runpy
 import tomllib
 from pathlib import Path
+from xml.dom import minidom
 from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.win32.winmanifest import create_application_manifest
 from PyInstaller.utils.win32.versioninfo import FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo
 
 # Keep DLL discovery independent of unrelated tools installed on PATH.
@@ -59,10 +61,18 @@ _common = dict(
 gui_a = Analysis(["../src/codex_account_manager/gui/tray_main.py"], **_common)
 gui_a.binaries = [item for item in gui_a.binaries if Path(item[0]).name != "opengl32sw.dll"]
 gui_pyz = PYZ(gui_a.pure)
+gui_manifest = minidom.parseString(create_application_manifest())
+windows_settings = gui_manifest.getElementsByTagName("windowsSettings")[0]
+for name, year, value in (("dpiAware", 2005, "true/pm"), ("dpiAwareness", 2016, "PerMonitorV2")):
+    setting = gui_manifest.createElement(name)
+    setting.setAttribute("xmlns", f"http://schemas.microsoft.com/SMI/{year}/WindowsSettings")
+    setting.appendChild(gui_manifest.createTextNode(value))
+    windows_settings.appendChild(setting)
 gui_exe = EXE(
     gui_pyz, gui_a.scripts, [], exclude_binaries=True,
     name="QuotaCrew", console=False, icon=os.path.join(SPECPATH, "assets", "app.ico"),
     version=executable_version("QuotaCrew"),
+    manifest=gui_manifest.toxml(),
 )
 gui_coll = COLLECT(
     gui_exe, gui_a.binaries, gui_a.datas, name="QuotaCrew",

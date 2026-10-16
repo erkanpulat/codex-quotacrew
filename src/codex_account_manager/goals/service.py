@@ -9,7 +9,7 @@ from functools import wraps
 from hashlib import sha256
 from typing import Any, ParamSpec, TypeVar, cast
 
-from codex_account_manager.adapters.interfaces import AppServerAdapter, GoalInfo
+from codex_account_manager.adapters.interfaces import AppServerAdapter
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.paths import paths
 from codex_account_manager.domain.models import GoalCheckpoint
@@ -22,7 +22,7 @@ from codex_account_manager.storage.repositories import EventRepository, GoalRepo
 
 @dataclass(frozen=True)
 class ReconcileResult:
-    action: str  # "none" | "restored" | "blocked" | "skipped_user_cleared" | "terminal"
+    action: str
     goal: GoalCheckpoint | None
     detail: str
 
@@ -130,7 +130,7 @@ class GoalService:
     async def reconcile_after_resume(
         self, thread_id: str, adapter: AppServerAdapter
     ) -> ReconcileResult:
-        """Compare the local checkpoint with the native goal and restore if safe."""
+        """Reconcile the local note without recreating or changing a native goal."""
         checkpoint = await self.goals.get_for_thread(thread_id)
         native = await adapter.get_goal(thread_id)
 
@@ -186,24 +186,11 @@ class GoalService:
             await self.goals.upsert(checkpoint)
             return ReconcileResult("none", checkpoint, "Native goal is present; nothing to do.")
 
-        # QuotaCrew believes there is an active goal but native goal is gone.
-        if native is None:
-            await self._mark_status(thread_id, GoalState.NEEDS_USER)
-            return ReconcileResult(
-                "blocked",
-                checkpoint,
-                "Native goal could not be verified; automatic restoration was skipped.",
-            )
-        try:
-            restored: GoalInfo = await adapter.set_goal(thread_id, checkpoint.objective)
-            checkpoint.native_goal_present = True
-            checkpoint.native_goal_status = restored.status
-            checkpoint.local_status = GoalState.ACTIVE_AFTER_HANDOFF
-            checkpoint.last_handoff_at = datetime.now(UTC)
-            checkpoint.revision += 1
-            await self.goals.upsert(checkpoint)
-            await self.events.append("goal.restored", thread_id=thread_id)
-            return ReconcileResult("restored", checkpoint, "Native goal restored from checkpoint.")
-        except Exception as exc:
-            await self._mark_status(thread_id, GoalState.NEEDS_USER)
-            return ReconcileResult("blocked", checkpoint, f"Goal restore failed: {exc}")
+        checkpoint = await self._mark_status(thread_id, GoalState.NEEDS_USER)
+        return ReconcileResult(
+            "blocked",
+            checkpoint,
+            "Native goal could not be verified; the local note was left unchanged."
+            if native is None
+            else "No native goal is present. Review the goal in Codex; local notes do not recreate goals or reset their budgets.",
+        )

@@ -53,7 +53,14 @@ def main() -> None:
                 reconfigure(encoding="utf-8")
             except (ValueError, OSError):
                 pass
-    configure_logging()
+    try:
+        configure_logging()
+    except OSError:
+        console.print(
+            "[bold red]Error:[/bold red] Local data could not be accessed or protected. "
+            "Check the data folder permissions; do not delete account data."
+        )
+        raise typer.Exit(1) from None
     _run(initialize_database())
 
 
@@ -195,7 +202,12 @@ def sandbox_setup(alias: str) -> None:
     if not profile:
         console.print(f"[red]Profile not found:[/red] {alias}")
         raise typer.Exit(1)
-    raise typer.Exit(run_sandbox_setup_elevated(profile.codex_home))
+    try:
+        code = run_sandbox_setup_elevated(profile.codex_home)
+    except AccountManagerError as exc:
+        console.print(f"[bold red]Error:[/bold red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    raise typer.Exit(code)
 
 
 @app.command("account")
@@ -388,7 +400,7 @@ def goal_clear(thread: str) -> None:
     from codex_account_manager.goals.service import GoalService
 
     _run(GoalService().user_clear(thread))
-    console.print("[green]Goal cleared (will not be auto-restored).[/green]")
+    console.print("[green]Local goal note cleared. Native Codex goals are unchanged.[/green]")
 
 
 if __name__ == "__main__":
