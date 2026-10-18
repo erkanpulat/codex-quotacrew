@@ -27,6 +27,7 @@ from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.core.events import bus
 from codex_account_manager.core.logging import get_logger
+from codex_account_manager.domain.states import HandoffReason
 from codex_account_manager.gui.about import AboutView
 from codex_account_manager.gui.accounts import AccountsView
 from codex_account_manager.gui.activity import ActivityView
@@ -691,9 +692,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("Switching to {alias}…", alias=alias))
 
         async def _do():
+            from codex_account_manager.storage.repositories import SettingsRepository
+
             continuity = ContinuityService(accounts=self.accounts)
-            if follow_latest:
-                return await continuity.continue_on_limit(alias)
+            monitoring = await SettingsRepository().get("monitor_enabled", "true") == "true"
+            if follow_latest or (monitoring and await continuity.automation.enabled()):
+                reason = HandoffReason.USAGE_LIMITED if follow_latest else HandoffReason.MANUAL
+                return await continuity.continue_on_limit(alias, reason=reason)
             return await continuity.handoff(alias)
 
         self.runner.submit(_do(), lambda _: self._switch_done(alias), self._switch_failed)

@@ -30,6 +30,50 @@ async def test_successful_switch_commits(tmp_paths):
     assert store.read_active() == b'{"account":"new"}'
 
 
+async def test_running_desktop_is_relaunched_when_registration_check_is_unavailable(
+    tmp_paths, monkeypatch
+):
+    from codex_account_manager.adapters.desktop import WindowsDesktopLauncher
+    from codex_account_manager.platform import windows
+
+    class RunningDesktop(WindowsDesktopLauncher):
+        def __init__(self):
+            self.running = True
+            self.launches = 0
+
+        def stop(self):
+            self.running = False
+
+        def launch(self):
+            self.launches += 1
+            self.running = True
+
+        def is_running(self):
+            return self.running
+
+        def require_available(self):
+            return None
+
+        async def wait_ready(self, timeout=30.0):
+            return self.running
+
+    monkeypatch.setattr(windows, "is_desktop_installed", lambda: False)
+    store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
+    store.write_active_atomic(b'{"account":"old"}')
+    profile = _profile(tmp_paths, "acc-1")
+
+    async def verify(_home):
+        return "acc-1"
+
+    desktop = RunningDesktop()
+    result = await AuthTransaction(
+        credential_store=store, desktop=desktop, verify_account=verify
+    ).switch(profile)
+
+    assert result.success
+    assert desktop.launches == 1
+
+
 async def test_revoked_target_is_rejected_before_stopping_desktop(
     tmp_paths, migrated_db, monkeypatch
 ):

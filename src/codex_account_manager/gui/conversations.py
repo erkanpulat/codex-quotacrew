@@ -28,7 +28,7 @@ from codex_account_manager.core.events import bus
 from codex_account_manager.domain.models import ThreadRecord
 from codex_account_manager.gui.async_runner import AsyncRunner
 from codex_account_manager.gui.design import DARK, make_icon, set_button_icon
-from codex_account_manager.gui.i18n import source_label, state_label, tr
+from codex_account_manager.gui.i18n import source_label, state_label, tr, work_status
 from codex_account_manager.gui.view_base import (
     BaseView,
     SortableItem,
@@ -346,6 +346,12 @@ class ConversationsView(BaseView):
             tr("Project") + " " + thread.project_id[:8] if thread.project_id else tr("No project")
         )
 
+    @staticmethod
+    def _title(thread: ThreadRecord | None, fallback: str) -> str:
+        if thread and thread.title and thread.title.strip():
+            return thread.title.strip().replace("\n", " ")
+        return fallback
+
     def refresh(self) -> None:
         self._sync()
         self.refresh_tracking()
@@ -425,7 +431,10 @@ class ConversationsView(BaseView):
 
     @staticmethod
     async def _tracking_snapshot() -> tuple[list[ObservedWork], dict[str, str]]:
-        tracked = await WorkTracker().visible()
+        from codex_account_manager.adapters.credential_store import FileCredentialStore
+
+        account_id = FileCredentialStore().active_account_hint()
+        tracked = await WorkTracker().visible() if account_id else []
         profiles = await ProfileRepository().list()
         names = {
             account_hash(profile.bound_account_id): profile.alias
@@ -472,7 +481,7 @@ class ConversationsView(BaseView):
         self.tracked_table.setSortingEnabled(False)
         self.tracked_table.setRowCount(len(self._tracked))
         titles = {
-            thread.id: thread.title or thread.preview or thread.id[:12] for thread in self._threads
+            thread.id: self._title(thread, tr("Tracked conversation")) for thread in self._threads
         }
         for row, work in enumerate(self._tracked):
             title = titles.get(work.thread_id, work.thread_id[:12])
@@ -481,18 +490,11 @@ class ConversationsView(BaseView):
                 if work.goal_present
                 else tr("No Codex goal")
             )
+            turn_label, turn_detail = work_status(work)
             values = (
                 title,
                 self._account_names.get(work.account_hash, tr("Unknown account")),
-                tr("Owner unavailable; retrying later")
-                if work.unavailable_reason == "owner_unavailable"
-                else tr("Live state unavailable")
-                if not work.verified
-                else tr("Waiting for Desktop continuation")
-                if work.turn_status == "awaitingDesktop"
-                else tr("Limit reached")
-                if work.limited
-                else state_label(work.turn_status),
+                turn_label,
                 goal,
                 datetime.fromtimestamp(work.observed_at).strftime("%d.%m %H:%M"),
             )
@@ -517,6 +519,7 @@ class ConversationsView(BaseView):
                 elif column == 2:
                     item.setData(Qt.ItemDataRole.UserRole + 2, value)
                     item.setData(Qt.ItemDataRole.AccessibleTextRole, value)
+                    item.setToolTip(turn_detail or value)
                 self.tracked_table.setItem(row, column, item)
             status_host, status_layout = table_cell()
             status_host.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -531,6 +534,8 @@ class ConversationsView(BaseView):
             )
             badge = Pill(values[2], tone)
             badge.setWordWrap(True)
+            badge.setToolTip(turn_detail or turn_label)
+            status_host.setToolTip(badge.toolTip())
             status_layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
             status_layout.addStretch()
             self.tracked_table.setCellWidget(row, 2, status_host)
@@ -579,7 +584,7 @@ class ConversationsView(BaseView):
         )
         thread = next((t for t in self._threads if work and t.id == work.thread_id), None)
         self.work_detail_title.setText(
-            (thread.title or thread.preview or tr("Tracked conversation"))
+            self._title(thread, tr("Tracked conversation"))
             if thread
             else tr("Tracked conversation")
             if work
@@ -593,11 +598,7 @@ class ConversationsView(BaseView):
                 else None
             )
             self.work_fields[key].setText(
-                str(cell.data(Qt.ItemDataRole.UserRole + 2))
-                if cell and key == "turn"
-                else cell.text()
-                if cell
-                else "—"
+                cell.toolTip() if cell and key == "turn" else cell.text() if cell else "—"
             )
 
     def _filter_work(self, *_args) -> None:
@@ -808,7 +809,7 @@ class ConversationsView(BaseView):
             self.table.setRowCount(0)
             self.table.setRowCount(len(rows))
             for row, thread in enumerate(rows):
-                title = thread.title or thread.preview or thread.id
+                title = self._title(thread, thread.id)
                 values = (
                     title,
                     self._project_title(thread),

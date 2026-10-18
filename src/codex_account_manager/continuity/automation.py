@@ -36,6 +36,7 @@ from codex_account_manager.core.events import bus
 from codex_account_manager.core.logging import get_logger
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.paths import paths
+from codex_account_manager.core.redaction import redact_text
 from codex_account_manager.domain.states import GoalState
 from codex_account_manager.goals.service import GoalService
 from codex_account_manager.platform.ide_session import IDESession
@@ -78,6 +79,7 @@ def has_verified_limit_turn(turn: dict | None, goal: GoalInfo | None) -> bool:
     error = turn.get("error")
     status = normalize_turn_status(turn.get("status"))
     if status == "failed":
+        # Failed turn with usageLimitExceeded is reliable regardless of goal.present
         return isinstance(error, dict) and error.get("codexErrorInfo") == "usageLimitExceeded"
     return bool(
         status == "completed"
@@ -100,6 +102,7 @@ class ContinuationSupervisor:
         self.tracker = WorkTracker()
         self._account_readers = 0
         self._account_lock: OperationLock | None = None
+        self._queued_executions = 0
 
     @contextmanager
     def _account_session(self) -> Iterator[None]:
@@ -124,6 +127,21 @@ class ContinuationSupervisor:
 
     async def desktop_enabled(self) -> bool:
         return await SettingsRepository().get("desktop_continue", "true") == "true"
+
+    async def wait_desktop_channel(self, thread_id: str, timeout: float = 30.0) -> None:
+        """Wait until Desktop's native app-tools channel answers a read."""
+        await self.native.wait_latest_turn(thread_id, timeout=timeout)
+
+    @staticmethod
+    async def _restart_desktop_if_needed() -> None:
+        from codex_account_manager.adapters.desktop import WindowsDesktopLauncher
+
+        launcher = WindowsDesktopLauncher()
+        if launcher.is_running():
+            return
+        launcher.launch()
+        if not await launcher.wait_ready(30.0):
+            raise ConnectionNotReadyError("Codex Desktop did not reopen after the account switch.")
 
     async def uses_ide(self, adapter: CodexAppServer, thread_id: str) -> bool:
         return await self.ide_enabled() and not await adapter.is_desktop_thread(thread_id)
@@ -228,6 +246,7 @@ class ContinuationSupervisor:
 
         async def run_lane(queued: list[ContinuationTicket]) -> None:
             waiting = set()
+            cancelled = False
             try:
                 for ticket in queued:
                     try:
@@ -245,25 +264,45 @@ class ContinuationSupervisor:
                             continue
                         if ticket.desktop:
                             async with asyncio.timeout(NATIVE_CONTINUATION_SECONDS):
-                                await self.run(ticket)
+                                self._queued_executions += 1
+                                try:
+                                    await self.run(ticket)
+                                finally:
+                                    self._queued_executions -= 1
                         else:
                             await self.run(ticket)
                     except ConnectionNotReadyError:
+                        if ticket.desktop and not ticket.owner_id:
+                            try:
+                                await self._restart_desktop_if_needed()
+                            except Exception:
+                                log.warning("Codex Desktop could not be reopened for recovery.")
                         waiting.add((ticket.thread_id, ticket.turn_id))
                         await self.report(
                             ticket.thread_id,
                             "waiting_connection",
                             "ide" if ticket.owner_id else "desktop",
                         )
-                    except Exception:
-                        await self.report(ticket.thread_id, "needs_user", "connection")
+                    except Exception as exc:
+                        if (
+                            ticket.desktop
+                            and not ticket.owner_id
+                            and "native channel" in str(exc).casefold()
+                        ):
+                            await self.report(ticket.thread_id, "waiting_connection", "desktop")
+                            waiting.add((ticket.thread_id, ticket.turn_id))
+                        else:
+                            await self.report(ticket.thread_id, "needs_user", "connection")
             except asyncio.CancelledError:
-                waiting.clear()
+                # Cancellation is a process/lifecycle event. Keep every ticket
+                # durable so a later startup can recover it exactly once.
+                cancelled = True
                 raise
             finally:
-                await self.discard_pending(
-                    [t for t in queued if (t.thread_id, t.turn_id) not in waiting]
-                )
+                if not cancelled:
+                    await self.discard_pending(
+                        [t for t in queued if (t.thread_id, t.turn_id) not in waiting]
+                    )
 
         async def run_all() -> None:
             results = await asyncio.gather(
@@ -344,15 +383,16 @@ class ContinuationSupervisor:
         if ready:
             self.launch_batch(ready)
 
-    async def stop(self) -> None:
+    async def stop(self, *, clear_pending: bool = False) -> None:
         tasks = tuple(self.tasks)
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        async with connect() as db:
-            await db.execute("DELETE FROM pending_continuations")
-            await db.commit()
+        if clear_pending:
+            async with connect() as db:
+                await db.execute("DELETE FROM pending_continuations")
+                await db.commit()
 
     async def _claim(self, ticket: ContinuationTicket) -> str | None:
         message_id = str(uuid4())
@@ -622,6 +662,12 @@ class ContinuationSupervisor:
                 final_goal = await adapter.get_goal(ticket.thread_id)
                 if final_goal is None or final_goal.status != "active":
                     raise AppServerError("Could not restore the Desktop goal before continuation.")
+                if ticket.owner_id:
+                    refreshed = await latest_turn()
+                    if refreshed.get("id") != ticket.turn_id or normalize_turn_status(
+                        refreshed.get("status")
+                    ) != normalize_turn_status(current.get("status")):
+                        raise AppServerError("The IDE conversation changed after goal recovery.")
             stage = "owner_busy"
             if owner_snapshot and (
                 owner_snapshot.blocked
@@ -702,10 +748,25 @@ class ContinuationSupervisor:
         except Exception as exc:
             if claimed:
                 await self._record(ticket, "uncertain")
+            if self._queued_executions > 0 and stage == "observation":
+                raise ConnectionNotReadyError(
+                    "Desktop continuation was submitted but its result could not be observed."
+                ) from exc
+            if (
+                not claimed
+                and not ticket.owner_id
+                and stage in {"connection", "desktop", "verification"}
+                and isinstance(exc, AppServerError)
+                and "native channel" in str(exc).casefold()
+            ):
+                raise ConnectionNotReadyError("Codex Desktop native channel is not ready.") from exc
             if isinstance(exc, AppServerError) and re.search(r"\b401\b", str(exc)):
                 stage = "authentication"
             log.warning(
-                "Native continuation stopped (stage=%s, error=%s).", stage, type(exc).__name__
+                "Native continuation stopped (stage=%s, error=%s, detail=%s).",
+                stage,
+                type(exc).__name__,
+                redact_text(str(exc))[:500],
             )
             await self.report(ticket.thread_id, "needs_user", stage)
         finally:

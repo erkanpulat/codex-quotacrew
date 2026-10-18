@@ -94,6 +94,19 @@ def test_gui_entry_delegates_once_before_initializing_state(monkeypatch):
     assert len(launches) == 1
 
 
+def test_gui_entry_falls_back_when_explorer_is_unavailable(monkeypatch):
+    from codex_account_manager.core import windows_shell
+
+    monkeypatch.setattr(
+        windows_shell,
+        "launch_from_explorer",
+        lambda *args: (_ for _ in ()).throw(OSError("Explorer unavailable")),
+    )
+    monkeypatch.setattr(sys, "argv", ["QuotaCrew.exe"])
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert not windows_shell.delegate_gui_launch()
+
+
 def test_installed_desktop_shortcut_never_replaces_an_existing_file(tmp_path, monkeypatch):
     from codex_account_manager.core import windows_shell
 

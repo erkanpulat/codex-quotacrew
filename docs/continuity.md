@@ -40,6 +40,8 @@ Jobs counts verified running work. Completed conversations are retired after a s
 
 Clear tracking removes QuotaCrew observations and pauses automation; it does not delete Codex conversations. The latest continuation details are available from each job's menu.
 
+Continuation labels distinguish a queued request from one already sent. **Check in Codex** means no automatic retry is queued or the last attempt's result could not be verified. Open the conversation in Codex Desktop to check it; changing accounts does not replay an uncertain request for the same interrupted turn. Hover over the status or open **Work details** for the explanation.
+
 ## Optional Windows shutdown
 
 Plans require confirmation, apply only to the current application session and can be cancelled from the page or tray.

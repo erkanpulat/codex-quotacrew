@@ -38,6 +38,8 @@ def is_desktop_installed() -> bool:
     """Check the current user's registered package without launching Explorer."""
     if sys.platform != "win32":
         return False
+    if _desktop_processes():
+        return True
     function = ctypes.WinDLL("kernel32", use_last_error=True).GetPackagesByPackageFamily
     function.argtypes = [
         wintypes.LPCWSTR,
@@ -75,6 +77,8 @@ def _process_has_exited(pid: int) -> bool:
     except pywintypes.error as exc:
         if exc.winerror == winerror.ERROR_INVALID_PARAMETER:
             return True
+        if exc.winerror == getattr(winerror, "ERROR_ACCESS_DENIED", 5):
+            return False
         raise
     try:
         status = win32event.WaitForSingleObject(handle, 0)

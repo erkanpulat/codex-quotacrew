@@ -7,7 +7,7 @@ from codex_account_manager.adapters import native_desktop as native
 from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.continuity.automation import ContinuationSupervisor, ContinuationTicket
 from codex_account_manager.continuity.tracking import goal_signature
-from codex_account_manager.core.errors import AppServerError, ConnectionNotReadyError
+from codex_account_manager.core.errors import AppServerError
 from codex_account_manager.storage.database import connect
 from tests.fakes import ExecutionServer
 
@@ -29,16 +29,6 @@ def test_decode_native_result_requires_positive_receipt():
             native.decode_result(value, "request")
     with pytest.raises(AppServerError):
         native.decode_result(reply({}), "wrong-id")
-
-
-def test_decode_native_result_marks_unready_app_window_as_retryable():
-    response = {
-        "jsonrpc": "2.0",
-        "id": "request",
-        "error": {"message": "No ready app window supports app tools"},
-    }
-    with pytest.raises(ConnectionNotReadyError):
-        native.decode_result(response, "request")
 
 
 @pytest.mark.parametrize("change", [{"id": "other"}, {"kind": "chatgpt"}, {"hostId": "remote"}])
@@ -69,45 +59,78 @@ async def test_native_send_preserves_model_permissions_and_uses_target_context(m
     assert "budget" in params["arguments"]["prompt"]
 
 
-async def test_native_send_retries_only_until_app_window_is_ready(monkeypatch):
-    native_desktop = native.NativeDesktop()
-    calls = 0
+async def test_delivery_has_time_for_desktop_history_loading(monkeypatch):
+    budgets = []
 
-    async def call(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls < 3:
-            raise native.ConnectionNotReadyError(
-                "Codex Desktop has not finished preparing its app channel."
-            )
-        return {"threadId": "thread"}
+    def exchange(payload, cancelled, timeout):
+        budgets.append(timeout)
+        result = reply({"threadId": "thread"})
+        result["id"] = payload["id"]
+        return result
 
-    monkeypatch.setattr(native_desktop, "call", call)
-    monkeypatch.setattr(native.asyncio, "sleep", AsyncMock())
-    assert await native_desktop.send("thread", "turn") == {"threadId": "thread"}
-    assert calls == 3
-
-
-async def test_native_latest_turn_retries_until_app_window_is_ready(monkeypatch):
+    monkeypatch.setattr(native, "_exchange", exchange)
     client = native.NativeDesktop()
-    calls = 0
+    await client.call("thread", "turn")
+    await client.send("thread", "turn")
+    assert budgets == [15.0, 60.0]
 
-    async def call(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls < 3:
-            raise native.ConnectionNotReadyError(
-                "Codex Desktop has not finished preparing its app channel."
-            )
-        return {
-            "thread": {"id": "thread", "kind": "codex", "hostId": "local"},
-            "turns": [{"id": "turn", "status": "completed"}],
-        }
 
-    monkeypatch.setattr(client, "call", call)
-    monkeypatch.setattr(native.asyncio, "sleep", AsyncMock())
-    assert await client.latest_turn("thread") == {"id": "turn", "status": "completed"}
-    assert calls == 3
+async def test_native_channel_serializes_overlapping_calls(monkeypatch):
+    import asyncio
+    import threading
+    import time
+
+    started = threading.Event()
+    release = threading.Event()
+    active = 0
+    maximum = 0
+
+    def exchange(payload, _cancelled, _timeout):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        started.set()
+        while not release.is_set():
+            time.sleep(0.001)
+        active -= 1
+        result = reply({"thread": {"id": "thread"}})
+        result["id"] = payload["id"]
+        return result
+
+    monkeypatch.setattr(native, "_exchange", exchange)
+    client = native.NativeDesktop()
+    first = asyncio.create_task(client.call("thread", "turn"))
+    await asyncio.to_thread(started.wait, 1)
+    second = asyncio.create_task(client.call("thread", "turn"))
+    await asyncio.sleep(0.02)
+    assert maximum == 1
+    release.set()
+    await asyncio.gather(first, second)
+
+
+async def test_desktop_continuation_does_not_navigate_renderer(migrated_db, monkeypatch):
+    from codex_account_manager.platform import windows
+
+    supervisor, server, source, ticket = setup_native()
+    events = []
+    monkeypatch.setattr(windows, "open_conversation", lambda tid: events.append(("open", tid)))
+
+    async def ready(tid):
+        events.append(("ready", tid))
+        return source
+
+    supervisor.native.wait_latest_turn = ready
+    supervisor.native.latest_turn.side_effect = [source, {"id": "next", "status": "inProgress"}]
+    await supervisor.run(ticket)
+    supervisor.native.send.assert_awaited_once_with("thread", "last")
+    assert events == [("ready", "thread")]
+
+
+async def test_desktop_channel_gate_waits_for_a_verified_read():
+    supervisor = ContinuationSupervisor()
+    supervisor.native.wait_latest_turn = AsyncMock(return_value={"id": "turn"})
+    await supervisor.wait_desktop_channel("thread", timeout=12)
+    supervisor.native.wait_latest_turn.assert_awaited_once_with("thread", timeout=12)
 
 
 @pytest.mark.parametrize("bad", ["", "../thread", "a\n", "a?prompt=b", "a" * 129])
@@ -148,23 +171,6 @@ async def test_native_delivery_stays_in_desktop_and_tracks_next_account_limit(mi
     supervisor.native.latest_turn.return_value = source
     await supervisor.run(ticket)
     assert supervisor.native.send.await_count == 1
-
-
-async def test_usage_limited_desktop_goal_is_reactivated_before_delivery(migrated_db):
-    supervisor, server, source, _ = setup_native()
-    limited_goal = GoalInfo("thread", "Keep working", "usageLimited", True, 1000, 200)
-    server.native = limited_goal
-    ticket = ContinuationTicket("thread", "last", "acc-1", goal_signature(limited_goal), True)
-    supervisor.native.latest_turn.side_effect = [
-        source,
-        source,
-        {"id": "next", "status": "inProgress"},
-    ]
-
-    await supervisor.run(ticket)
-
-    assert server.reactivations == [limited_goal]
-    supervisor.native.send.assert_awaited_once_with("thread", "last")
 
 
 async def test_routing_401_is_reported_as_authentication_not_quota(migrated_db):

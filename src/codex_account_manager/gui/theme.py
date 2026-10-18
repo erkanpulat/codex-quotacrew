@@ -136,6 +136,9 @@ QScrollArea#AccountTableScroll {{ background: {p.surface}; border: none; }}
 QWidget#AccountHeader {{ background: {p.surface_alt}; border: none; border-bottom: 1px solid {p.border}; min-height: 43px; }}
 QFrame#AccountRow {{ background: {p.surface}; border: none; border-bottom: 1px solid {p.border}; }}
 QFrame#AccountsPanel {{ background: {card_bg}; border: 1px solid {p.border}; border-radius: 10px; }}
+QFrame#MetricCard {{ background: transparent; border: none; }}
+QLabel#MetricValue {{ color: {p.text}; font-size: 14px; font-weight: 700; }}
+QLabel#MetricCaption {{ color: {p.muted}; font-size: 13px; }}
 QFrame#PagePanel, QWidget#PagePanel {{
     background: {card_bg}; border: 1px solid {p.border}; border-radius: 10px;
 }}

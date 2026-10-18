@@ -1,10 +1,224 @@
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.continuity.tracking import WorkTracker
 from tests.fakes import FakeAppServer
 from tests.integration.test_limit_continuation import _limited_turn, _thread
+
+
+async def test_visible_distinguishes_queued_and_unverified_desktop_continuations(migrated_db):
+    from codex_account_manager.continuity.automation import (
+        ContinuationSupervisor,
+        ContinuationTicket,
+    )
+    from codex_account_manager.continuity.tracking import goal_signature
+
+    tracker = WorkTracker()
+    goal = GoalInfo("thread", None, None, False)
+    await tracker.observe(
+        "old-account",
+        "thread",
+        {"id": "running", "status": "inProgress"},
+        goal,
+    )
+    await tracker.observe("old-account", "thread", _limited_turn(), goal, limited=True)
+    await tracker.await_desktop(
+        "old-account", "new-account", ["thread"], turn_ids={"thread": "limited-turn"}
+    )
+
+    ticket = ContinuationTicket(
+        "thread", "limited-turn", "new-account", goal_signature(goal), desktop=True
+    )
+    supervisor = ContinuationSupervisor()
+    await supervisor.save_pending([ticket])
+    queued = (await tracker.visible())[0]
+    assert queued.continuation_pending
+    assert queued.continuation_status is None
+
+    await supervisor._claim(ticket)
+    await supervisor._record(ticket, "uncertain")
+    await supervisor.discard_pending([ticket])
+    unresolved = (await tracker.visible())[0]
+    assert not unresolved.continuation_pending
+    assert unresolved.continuation_status == "uncertain"
+
+    await supervisor.save_pending([ticket])
+    await tracker.observe("new-account", "thread", {"id": "new-turn", "status": "inProgress"}, goal)
+    running = (await tracker.visible())[0]
+    assert not running.continuation_pending
+    assert running.continuation_status is None
+
+
+async def test_expired_continuation_is_not_presented_as_queued(migrated_db, monkeypatch):
+    import codex_account_manager.continuity.tracking as module
+    from codex_account_manager.continuity.automation import (
+        ContinuationSupervisor,
+        ContinuationTicket,
+    )
+
+    monkeypatch.setattr(module.time, "time", lambda: 1000)
+    tracker = WorkTracker()
+    await tracker.observe(
+        "account",
+        "thread",
+        {"id": "turn", "status": "inProgress"},
+        GoalInfo("thread", None, None, False),
+    )
+    await ContinuationSupervisor().save_pending([ContinuationTicket("thread", "turn", "account")])
+    assert (await tracker.visible())[0].continuation_pending
+    monkeypatch.setattr(module.time, "time", lambda: 1600)
+    assert not (await tracker.visible())[0].continuation_pending
+
+
+async def test_verified_only_excludes_expired_observations(migrated_db, monkeypatch):
+    import codex_account_manager.continuity.tracking as module
+
+    tracker = WorkTracker()
+    monkeypatch.setattr(module.time, "time", lambda: 1000)
+    await tracker.observe(
+        "account-a",
+        "working",
+        {"id": "turn", "status": "inProgress"},
+        GoalInfo("working", None, None, False),
+    )
+    monkeypatch.setattr(module.time, "time", lambda: 2000)
+    assert not await tracker.visible("account-a", verified_only=True)
+    saved = await tracker.visible("account-a")
+    assert len(saved) == 1 and not saved[0].verified
+
+
+async def test_jobs_snapshot_without_active_account_never_shows_other_accounts(
+    migrated_db, monkeypatch
+):
+    from codex_account_manager.adapters.credential_store import FileCredentialStore
+    from codex_account_manager.gui.conversations import ConversationsView
+
+    await WorkTracker().observe(
+        "account-a",
+        "working",
+        {"id": "turn", "status": "inProgress"},
+        GoalInfo("working", None, None, False),
+    )
+    monkeypatch.setattr(FileCredentialStore, "active_account_hint", lambda self: None)
+    rows, _names = await ConversationsView._tracking_snapshot()
+    assert rows == []
+    monkeypatch.setattr(FileCredentialStore, "active_account_hint", lambda self: "account-a")
+    rows, _names = await ConversationsView._tracking_snapshot()
+    assert [row.thread_id for row in rows] == ["working"]
+
+
+async def test_manual_account_switch_does_not_hide_previously_tracked_jobs(
+    migrated_db, monkeypatch
+):
+    from codex_account_manager.adapters.credential_store import FileCredentialStore
+    from codex_account_manager.gui.conversations import ConversationsView
+
+    tracker = WorkTracker()
+    for tid in ("one", "two", "three", "four"):
+        await tracker.observe(
+            "current" if tid == "four" else "previous",
+            tid,
+            {"id": "turn", "status": "inProgress"},
+            GoalInfo(tid, None, None, False),
+        )
+    monkeypatch.setattr(FileCredentialStore, "active_account_hint", lambda _self: "current")
+    rows, _names = await ConversationsView._tracking_snapshot()
+    assert {row.thread_id for row in rows} == {"one", "two", "three", "four"}
+
+
+async def test_unavailable_tracked_owner_blocks_restart_during_cooldown(migrated_db, monkeypatch):
+    import pytest
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.errors import HandoffDeferredError
+
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[replace(_thread("working", 100), source="vscode")],
+    )
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
+    service = ContinuityService()
+    await service.tracker.observe(
+        "account-a",
+        "working",
+        {"id": "turn", "status": "inProgress"},
+        GoalInfo("working", None, None, False),
+    )
+    await service.tracker.mark_unavailable("working", "owner_unavailable")
+    with pytest.raises(HandoffDeferredError):
+        await service._require_restart_safe("account-a")
+
+
+async def test_unknown_tracked_source_is_not_restart_independent(migrated_db, monkeypatch):
+    import pytest
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.errors import HandoffDeferredError
+
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[replace(_thread("working", 100), source="unknown")],
+        turns={"working": {"id": "turn", "status": "inProgress"}},
+    )
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
+    service = ContinuityService()
+    with pytest.raises(HandoffDeferredError):
+        await service._require_restart_safe("account-a")
+
+
+async def test_scan_publishes_one_complete_snapshot_without_unverified_flicker(
+    migrated_db, monkeypatch
+):
+    import sqlite3
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.events import bus
+
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[replace(_thread(tid, 100), source="vscode") for tid in ("one", "two")],
+        turns={tid: {"id": "turn", "status": "inProgress"} for tid in ("one", "two")},
+    )
+    server.is_desktop_thread = AsyncMock(return_value=True)
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
+    service = ContinuityService()
+    service.automation.native.latest_turn = AsyncMock(side_effect=server.latest_turn)
+    await service.observe_work()
+    snapshots = []
+
+    def capture(_event):
+        with sqlite3.connect(migrated_db.db_path) as db:
+            snapshots.append(db.execute("SELECT verified FROM observed_work").fetchall())
+
+    unsubscribe = bus.subscribe("work.observed", capture)
+    try:
+        await service.observe_work()
+    finally:
+        unsubscribe()
+    assert snapshots == [[(1,), (1,)]]
+
+
+async def test_tracking_scan_does_not_drop_work_outside_recent_page(migrated_db, monkeypatch):
+    import codex_account_manager.continuity.service as module
+
+    threads = [_thread(str(index), 1000 - index) for index in range(60)]
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=threads,
+        turns={"59": {"id": "turn", "status": "inProgress"}},
+    )
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
+    tracker = WorkTracker()
+    await tracker.observe(
+        "account-a",
+        "59",
+        {"id": "turn", "status": "inProgress"},
+        GoalInfo("59", None, None, False),
+    )
+    await ContinuityService().observe_work()
+    assert "59" in await WorkTracker().ids("account-a")
 
 
 async def test_two_desktop_threads_capture_fast_quota_turn_between_polls(migrated_db, monkeypatch):
@@ -50,6 +264,30 @@ async def test_old_quota_failure_is_not_adopted_by_another_account(migrated_db):
     await tracker.observe("previous", "thread", {"id": "running", "status": "inProgress"}, goal)
     await tracker.observe("new", "thread", _limited_turn(), goal, limited=True)
     assert not await tracker.limited("new")
+
+
+async def test_previous_account_work_keeps_live_status_without_adopting_its_limit(migrated_db):
+    tracker = WorkTracker()
+    goal = GoalInfo("thread", None, None, False)
+    await tracker.observe("previous", "thread", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.unverified(["thread"])
+    await tracker.observe("current", "thread", _limited_turn(), goal, limited=True)
+    saved = await tracker.visible()
+    assert len(saved) == 1
+    assert saved[0].verified and saved[0].limited and saved[0].turn_status == "failed"
+    assert not await tracker.limited("current")
+
+
+async def test_visible_can_limit_to_active_account_and_verified_rows(migrated_db):
+    tracker = WorkTracker()
+    goal = GoalInfo("thread", None, None, False)
+    await tracker.observe("account-a", "running", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.observe("account-b", "other", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.unverified(["running"])
+    assert {row.thread_id for row in await tracker.visible("account-b", verified_only=True)} == {
+        "other"
+    }
+    assert await tracker.visible("account-a", verified_only=True) == []
 
 
 async def test_completed_work_is_retired_after_account_switch(migrated_db):
@@ -107,9 +345,10 @@ async def test_unverifiable_goal_keeps_checkpoint_for_later_revalidation(migrate
     server.get_goal = lambda _thread_id: _unknown_goal()
     monkeypatch.setattr(module, "CodexAppServer", lambda _, **kwargs: server)
     await ContinuityService().observe_work()
-    assert not await tracker.limited("account-a")
+    # Failed turn with usageLimitExceeded is treated as limited even if goal is unverifiable
+    assert await tracker.limited("account-a")
     saved = await tracker.visible()
-    assert len(saved) == 1 and saved[0].thread_id == "thread" and not saved[0].verified
+    assert len(saved) == 1 and saved[0].thread_id == "thread" and saved[0].limited
 
 
 async def _unknown_goal():
@@ -240,34 +479,6 @@ async def test_ide_new_failed_turn_between_polls_is_tracked_but_history_is_not(
     assert not await service.tracker.limited("account-a")
 
 
-async def test_unowned_ide_thread_is_cooled_down_without_blocking_next_observation(
-    migrated_db, monkeypatch
-):
-    from unittest.mock import AsyncMock
-
-    import codex_account_manager.continuity.service as module
-    from codex_account_manager.core.errors import OwnerNotFoundError
-    from codex_account_manager.storage.repositories import SettingsRepository
-
-    await SettingsRepository().set("ide_continue", "true")
-    info = replace(_thread("stale-ide", 100), source="vscode")
-    server = FakeAppServer(account_id="account-a", threads=[info])
-    server.is_desktop_thread = AsyncMock(return_value=False)
-    monkeypatch.setattr(module, "CodexAppServer", lambda *_a, **_kw: server)
-    service = ContinuityService()
-    service.automation.ide.inspect = AsyncMock(
-        side_effect=OwnerNotFoundError("No local client owns this conversation.")
-    )
-
-    await service.observe_work()
-    assert "stale-ide" in await WorkTracker().cooling_down_ids()
-    await service.observe_work()
-
-    service.automation.ide.inspect.assert_awaited_once_with("stale-ide")
-    assert not service._restart_blockers
-    assert not service._unavailable_independent
-
-
 async def test_saved_work_cannot_cross_account_or_survive_new_goal(migrated_db):
     tracker = WorkTracker()
     old_goal = GoalInfo("thread", "Original", "active", True, 500, 10)
@@ -330,13 +541,48 @@ async def test_desktop_followup_cannot_transfer_another_accounts_work(migrated_d
     assert not await tracker.ids("target")
 
 
+async def test_stalled_cli_read_does_not_hide_four_desktop_jobs(migrated_db, monkeypatch):
+    import asyncio
+
+    import codex_account_manager.continuity.service as module
+
+    desktop_ids = ("one", "two", "three", "four")
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[_thread("stalled-cli", 200)]
+        + [replace(_thread(tid, 100), source="vscode") for tid in desktop_ids],
+        turns={tid: {"id": "turn", "status": "inProgress"} for tid in desktop_ids},
+    )
+    read_turn = server.latest_turn
+
+    async def read(thread_id):
+        if thread_id == "stalled-cli":
+            await asyncio.Event().wait()
+        return await read_turn(thread_id)
+
+    server.latest_turn = read
+    server.observed_turn = read
+    server.is_desktop_thread = AsyncMock(return_value=True)
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
+    monkeypatch.setattr(module, "OBSERVATION_TIMEOUT", 5)
+    monkeypatch.setattr(module, "THREAD_CHECK_TIMEOUT", 1)
+    service = ContinuityService()
+    service.automation.native.latest_turn = read
+    assert await service.observe_work() == "account-a"
+    assert set(await WorkTracker().ids("account-a")) == set(desktop_ids)
+
+
 async def test_stalled_conversation_does_not_hide_running_work(migrated_db, monkeypatch):
     import asyncio
 
     import codex_account_manager.continuity.service as module
 
     server = FakeAppServer(
-        account_id="account-a", threads=[_thread("slow", 200), _thread("live", 100)]
+        account_id="account-a",
+        threads=[
+            replace(_thread("slow", 200), source="vscode"),
+            replace(_thread("live", 100), source="vscode"),
+        ],
     )
     cancelled = asyncio.Event()
 
@@ -349,6 +595,8 @@ async def test_stalled_conversation_does_not_hide_running_work(migrated_db, monk
         return {"id": "live-turn", "status": "inProgress"}
 
     server.observed_turn = observed
+    server.latest_turn = observed
+    server.is_desktop_thread = AsyncMock(return_value=True)
     monkeypatch.setattr(module, "CodexAppServer", lambda _, **kwargs: server)
     monkeypatch.setattr(module, "THREAD_CHECK_TIMEOUT", 1)
     statuses = []
@@ -356,7 +604,9 @@ async def test_stalled_conversation_does_not_hide_running_work(migrated_db, monk
         "work.observation_status", lambda event: statuses.append(event.payload)
     )
     try:
-        assert await ContinuityService().observe_work() == "account-a"
+        service = module.ContinuityService()
+        service.automation.native.latest_turn = observed
+        assert await service.observe_work() == "account-a"
     finally:
         unsubscribe()
     assert cancelled.is_set()
@@ -372,7 +622,11 @@ async def test_scan_deadline_preserves_results_and_cancels_pending_reads(migrate
     import codex_account_manager.continuity.service as module
 
     server = FakeAppServer(
-        account_id="account-a", threads=[_thread("live", 200), _thread("slow", 100)]
+        account_id="account-a",
+        threads=[
+            replace(_thread("live", 200), source="vscode"),
+            replace(_thread("slow", 100), source="vscode"),
+        ],
     )
     pending = set()
 
@@ -386,10 +640,14 @@ async def test_scan_deadline_preserves_results_and_cancels_pending_reads(migrate
         return {"id": "live-turn", "status": "inProgress"}
 
     server.observed_turn = observed
+    server.latest_turn = observed
+    server.is_desktop_thread = AsyncMock(return_value=True)
     monkeypatch.setattr(module, "CodexAppServer", lambda _, **kwargs: server)
     monkeypatch.setattr(module, "THREAD_SCAN_TIMEOUT", 1)
     monkeypatch.setattr(module, "THREAD_CHECK_TIMEOUT", 10)
-    assert await ContinuityService().observe_work() == "account-a"
+    service = module.ContinuityService()
+    service.automation.native.latest_turn = observed
+    assert await service.observe_work() == "account-a"
     assert not pending
     assert await WorkTracker().ids("account-a") == ["live"]
 

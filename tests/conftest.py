@@ -74,6 +74,16 @@ def block_live_native_desktop(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fake_shell_open(monkeypatch):
+    import os
+    from unittest.mock import Mock
+
+    opened = Mock()
+    monkeypatch.setattr(os, "startfile", opened, raising=False)
+    return opened
+
+
+@pytest.fixture(autouse=True)
 def block_live_shutdown(monkeypatch):
     from codex_account_manager.platform import power
 

@@ -591,6 +591,75 @@ def test_tracked_work_explains_turn_and_goal_without_storing_objective(window):
     assert view.tracked_goal.isEnabled()
 
 
+@pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.parametrize(
+    "pending,status,labels,detail_words",
+    [
+        (True, None, ("Continuation queued", "Devam sırada"), ("connection", "bağlantı")),
+        (
+            True,
+            "sending",
+            ("Checking continuation", "Devam doğrulanıyor"),
+            ("sent again", "tekrar gönderil"),
+        ),
+        (
+            True,
+            "submitted",
+            ("Continuation sent", "Devam isteği gönderildi"),
+            ("sent again", "tekrar gönderil"),
+        ),
+        (
+            False,
+            "submitted",
+            ("Continuation sent", "Devam isteği gönderildi"),
+            ("sent again", "tekrar gönderil"),
+        ),
+        (
+            True,
+            "uncertain",
+            ("Check in Codex", "Codex'te kontrol gerekli"),
+            ("sent again", "tekrar gönderil"),
+        ),
+        (
+            False,
+            "uncertain",
+            ("Check in Codex", "Codex'te kontrol gerekli"),
+            ("sent again", "tekrar gönderil"),
+        ),
+        (False, None, ("Check in Codex", "Codex'te kontrol gerekli"), ("queued", "sırada")),
+    ],
+)
+def test_tracked_work_explains_desktop_continuation(
+    window, monkeypatch, language, pending, status, labels, detail_words
+):
+    from codex_account_manager.continuity.tracking import ObservedWork
+    from codex_account_manager.gui import i18n
+    from codex_account_manager.gui.widgets import Pill
+
+    monkeypatch.setattr(i18n, "_language", language)
+
+    view = window.conversations
+    work = ObservedWork(
+        "thread-a",
+        "account-hash",
+        "awaitingDesktop",
+        "usageLimited",
+        True,
+        False,
+        1_800_000_000,
+        continuation_pending=pending,
+        continuation_status=status,
+    )
+    view._render_tracking(([work], {"account-hash": "Work"}))
+    badge = view.tracked_table.cellWidget(0, 2).findChild(Pill)
+    assert badge.text() == labels[language == "tr"]
+    assert detail_words[language == "tr"] in badge.toolTip().casefold()
+    assert badge.toolTip() in view.work_fields["turn"].text()
+    assert badge.toolTip() == view.tracked_table.item(0, 2).toolTip()
+    window.dashboard._render_work(([work], None))
+    assert badge.text() in window.dashboard.work_detail.text()
+
+
 def test_conversation_refresh_failure_keeps_rows_and_unlocks_button(window):
     from codex_account_manager.domain.models import ThreadRecord
 
@@ -709,6 +778,47 @@ def test_switch_confirmation_does_not_open_nested_dialogs(window, monkeypatch):
     window._switch("Example")
     assert len(calls) == 1
     assert not window._switching
+
+
+@pytest.mark.parametrize(
+    "settings, expected",
+    [
+        ({}, "continued"),
+        ({"auto_continue": "false"}, "switched"),
+        ({"monitor_enabled": "false"}, "switched"),
+    ],
+)
+async def test_manual_switch_obeys_continuation_settings(
+    window, migrated_db, monkeypatch, settings, expected
+):
+    from PySide6.QtWidgets import QMessageBox
+
+    import codex_account_manager.gui.main_window as module
+    from codex_account_manager.continuity.service import ContinuityService
+    from codex_account_manager.domain.states import HandoffReason
+    from codex_account_manager.storage.repositories import SettingsRepository
+
+    for key, value in settings.items():
+        await SettingsRepository().set(key, value)
+    service = ContinuityService()
+
+    async def resume(alias, *, reason):
+        assert alias == "target" and reason == HandoffReason.MANUAL
+        return "continued"
+
+    async def switch(alias):
+        assert alias == "target"
+        return "switched"
+
+    monkeypatch.setattr(module, "ContinuityService", lambda **_kwargs: service)
+    monkeypatch.setattr(service, "continue_on_limit", resume)
+    monkeypatch.setattr(service, "handoff", switch)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.Yes)
+    submitted = []
+    monkeypatch.setattr(window.runner, "submit", lambda coro, *_args: submitted.append(coro))
+    window._switch("target")
+    assert len(submitted) == 1
+    assert await submitted[0] == expected
 
 
 def test_login_error_is_translated_and_allows_retry(window, monkeypatch):

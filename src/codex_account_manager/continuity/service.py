@@ -128,6 +128,7 @@ class ContinuityService:
         self._restart_independent.clear()
         self._unavailable_independent.clear()
         self._restart_blockers.clear()
+
         bus.publish("work.observation_status", state="checking")
         try:
             async with asyncio.timeout(OBSERVATION_TIMEOUT):
@@ -162,41 +163,82 @@ class ContinuityService:
                 key: value for key, value in self._turn_baselines.items() if key in listed
             }
             await self.tracker.reconcile({info.id for info in infos})
-            candidates = sorted(
-                (i for i in infos if i.id and not (i.source or "").startswith("subAgent")),
+
+            sources: dict[str, str | None] = {i.id: i.source for i in infos if i.source}
+
+            active_threads = [
+                i
+                for i in infos
+                if i.id
+                and not (i.source or "").startswith("subAgent")
+                and i.status in {"inProgress", "awaitingUser", "paused"}
+                and i.source in {"cli", "exec", "appServer", "vscode", "unknown", None}
+            ]
+
+            active_threads = sorted(
+                active_threads,
                 key=lambda i: i.recency_at or i.updated_at or 0,
                 reverse=True,
             )
-            # Recheck work tracked before the account switch too.
+
+            other_threads = [
+                i
+                for i in infos
+                if i.id
+                and not (i.source or "").startswith("subAgent")
+                and i.status not in {"inProgress", "awaitingUser", "paused"}
+            ]
+            other_threads = sorted(
+                other_threads,
+                key=lambda i: i.recency_at or i.updated_at or 0,
+                reverse=True,
+            )
+
+            candidates = active_threads + other_threads[:20]
+
             tracked = await self.tracker.ids()
             cooling_down = await self.tracker.cooling_down_ids()
-            selected = list(dict.fromkeys([*tracked, *(i.id for i in candidates[:20])]))
+            self._restart_blockers.update(set(tracked) & cooling_down)
+            selected = list(dict.fromkeys([*tracked, *(i.id for i in candidates)]))
             selected = [thread_id for thread_id in selected if thread_id not in cooling_down]
-            sources = {i.id: i.source for i in candidates}
+
             for thread_id in tracked:
-                saved_thread = await self.threads.get(thread_id)
-                if saved_thread and thread_id not in sources:
-                    sources[thread_id] = saved_thread.source
+                if thread_id not in sources:
+                    saved_thread = await self.threads.get(thread_id)
+                    if saved_thread:
+                        sources[thread_id] = saved_thread.source
+
             checked = 0
             unavailable = 0
             unsupported = 0
             completed: set[str] = set()
+
             semaphore = asyncio.Semaphore(THREAD_CHECK_CONCURRENCY)
-            await self.tracker.unverified(selected)
 
             async def inspect(thread_id: str) -> None:
                 nonlocal checked, unavailable, unsupported
                 async with semaphore:
                     try:
                         async with asyncio.timeout(THREAD_CHECK_TIMEOUT):
+                            turn: dict | None = None
+                            goal: GoalInfo | None = None
                             source = sources.get(thread_id)
-                            if source is None:
+                            if source in {None, "unknown"}:
                                 source = await adapter.thread_source(thread_id)
-                            if source not in {"cli", "exec", "appServer", "vscode"}:
+                                sources[thread_id] = source
+
+                            if source not in {
+                                "cli",
+                                "exec",
+                                "appServer",
+                                "vscode",
+                                "unknown",
+                                None,
+                            }:
                                 unsupported += 1
                                 completed.add(thread_id)
                                 return
-                            turn: dict | None
+
                             if source == "vscode":
                                 if not await adapter.is_desktop_thread(thread_id):
                                     self._restart_independent.add(thread_id)
@@ -211,9 +253,16 @@ class ContinuityService:
                                     turn = await verified_desktop_turn(
                                         self.automation.native, adapter, thread_id
                                     )
+                                goal = await adapter.get_goal(thread_id) if turn else None
                             else:
-                                self._restart_independent.add(thread_id)
+                                if source in {"cli", "exec", "appServer"}:
+                                    self._restart_independent.add(thread_id)
                                 turn = await adapter.observed_turn(thread_id)
+                                goal = await adapter.get_goal(thread_id) if turn else None
+
+                            if source in {"cli", "exec", "appServer"}:
+                                self._restart_independent.add(thread_id)
+
                             if (
                                 thread_id not in self._restart_independent
                                 and turn
@@ -221,9 +270,20 @@ class ContinuityService:
                             ):
                                 self._work_running = True
                                 self._restart_blockers.add(thread_id)
-                            goal = await adapter.get_goal(thread_id) if turn else None
+
                             if turn and goal is None:
-                                raise AppServerError("Observed goal could not be verified.")
+                                goal = GoalInfo(
+                                    thread_id=thread_id,
+                                    objective=None,
+                                    status=None,
+                                    present=False,
+                                )
+                            goal_verifiable = goal is not None or not turn
+                            if not goal_verifiable:
+                                unavailable += 1
+                                completed.add(thread_id)
+                                return
+
                             new_turn = False
                             if turn and goal is not None:
                                 previous = self._turn_baselines.get(thread_id)
@@ -235,6 +295,7 @@ class ContinuityService:
                                     and previous[2:] == current[2:]
                                 )
                                 self._turn_baselines[thread_id] = current
+
                             await self.tracker.observe(
                                 account_id,
                                 thread_id,
@@ -246,15 +307,14 @@ class ContinuityService:
                             )
                             checked += 1
                             completed.add(thread_id)
-                            bus.publish("work.observed")
+
                     except OwnerNotFoundError:
-                        # A stale local listing has no current owner. Keep the
-                        # history and retry after a cooldown, but do not block
-                        # account switching or re-probe it every poll.
                         await self.tracker.mark_unavailable(thread_id, "owner_unavailable")
-                        completed.add(thread_id)
+                        if thread_id in self._restart_independent:
+                            completed.add(thread_id)
                         unavailable += 1
                         log.info("Conversation owner unavailable; retrying after cooldown.")
+
                     except Exception as exc:
                         unavailable += 1
                         log.warning(
@@ -269,9 +329,11 @@ class ContinuityService:
             except TimeoutError:
                 unavailable = len(selected) - checked - unsupported
             incomplete = set(selected) - completed
+            await self.tracker.unverified(list(incomplete))
             self._unavailable_independent = incomplete & self._restart_independent
-            self._work_verified = not (incomplete - self._restart_independent)
             self._restart_blockers.update(incomplete - self._restart_independent)
+            self._work_verified = not self._restart_blockers
+            bus.publish("work.observed")
             bus.publish(
                 "work.observation_status",
                 state="partial" if unavailable else "ready",
@@ -446,6 +508,11 @@ class ContinuityService:
         for thread_id in self._restart_blockers:
             await self.automation.report(thread_id, "waiting_shared", "desktop_restart")
         if not self._work_verified:
+            eligible = await self.tracker.limited(account_id) if account_id else []
+            if eligible and not self._work_running:
+                for thread_id in self._restart_blockers:
+                    await self.automation.report(thread_id, "needs_user", "verification")
+                return account_id
             raise HandoffDeferredError(
                 "Account switch is waiting: conversation state could not be verified. Codex remains open."
             )
@@ -470,17 +537,32 @@ class ContinuityService:
         if self.automation.tasks:
             raise AppServerError("An automatic continuation is still running.")
         generation = self.tracker.generation
-        account_id = await self._require_restart_safe()
+
+        async def verify_source(expected: str | None = None) -> str | None:
+            if reason != HandoffReason.MANUAL:
+                return await self._require_restart_safe(expected)
+            current = await self.observe_work()
+            if expected is not None and current != expected:
+                raise HandoffDeferredError("The active account changed before the manual switch.")
+            return current
+
+        account_id = await verify_source()
 
         async def before_desktop_stop() -> None:
-            await self._require_restart_safe(account_id)
+            await verify_source(account_id)
             if (
                 await SettingsRepository().get("monitor_enabled", "true") != "true"
                 or self.tracker.generation != generation
             ):
                 raise HandoffDeferredError("Account switch stopped because monitoring changed.")
 
-        saved = await self.tracker.limited(account_id) if account_id else []
+        saved = (
+            await self.tracker.unfinished()
+            if reason == HandoffReason.MANUAL
+            else await self.tracker.limited(account_id)
+            if account_id
+            else []
+        )
         tickets = []
         preparation_failed = bool(self._unavailable_independent)
         restart_blocked = False
@@ -492,7 +574,11 @@ class ContinuityService:
             try:
                 async with asyncio.timeout(12):
                     ticket = await self.automation.prepare(thread_id)
-                if ticket and ticket.turn_id == turn_id and ticket.goal_signature == signature:
+                if (
+                    ticket
+                    and (ticket.turn_id == turn_id or reason == HandoffReason.MANUAL)
+                    and ticket.goal_signature == signature
+                ):
                     if ticket.desktop:
                         desktop_threads.append(thread_id)
                         desktop_tickets.append(ticket)
@@ -506,7 +592,7 @@ class ContinuityService:
                 preparation_failed = True
                 restart_blocked |= thread_id not in self._restart_independent
                 await self.automation.report(thread_id, "needs_user", "preparation")
-        if restart_blocked:
+        if restart_blocked and not (desktop_tickets or tickets):
             raise HandoffDeferredError(
                 "Account switch is waiting: continuation could not be prepared. Codex remains open."
             )
@@ -533,22 +619,37 @@ class ContinuityService:
             except Exception:
                 log.warning("Account switch committed; observed work could not be cleared.")
         ready_desktop: list[ContinuationTicket] = []
+        deferred_desktop: list[ContinuationTicket] = []
         if desktop_threads and account_id:
             try:
                 target = await self.profiles.get_by_alias(target_alias)
                 if not target or not target.bound_account_id:
                     raise AppServerError("The target account identity could not be verified.")
                 await self.tracker.await_desktop(
-                    account_id, target.bound_account_id, desktop_threads
+                    None if reason == HandoffReason.MANUAL else account_id,
+                    target.bound_account_id,
+                    desktop_threads,
+                    turn_ids={ticket.thread_id: ticket.turn_id for ticket in desktop_tickets},
                 )
+                await self.automation.wait_desktop_channel(desktop_threads[0])
                 bus.publish("work.observed")
                 ready_desktop = desktop_tickets
-            except Exception:
-                log.warning("Account switch committed; Desktop follow-up could not be saved.")
-                bus.publish("continuation.status", state="needs_user", stage="journal")
+            except Exception as exc:
+                deferred_desktop = desktop_tickets
+                log.warning(
+                    "Account switch committed; Desktop channel is not ready; keeping work pending (%s).",
+                    type(exc).__name__,
+                )
+                bus.publish("continuation.status", state="waiting_connection", stage="desktop")
         tickets = ready_desktop + tickets
+        kept_pending_ids = {item.thread_id for item in deferred_desktop}
         await self.automation.discard_pending(
-            [t for t in pending if t.thread_id not in {item.thread_id for item in tickets}]
+            [
+                t
+                for t in pending
+                if t.thread_id not in {item.thread_id for item in tickets}
+                and t.thread_id not in kept_pending_ids
+            ]
         )
         if tickets:
             try:

@@ -383,6 +383,22 @@ async def test_usage_goal_reactivation_only_updates_status_and_preserves_budget(
         await server.reactivate_usage_limited_goal("t", previous)
 
 
+async def test_listing_reads_all_pages_without_loading_rollout_history(monkeypatch):
+    server = CodexAppServer("test")
+
+    async def request(method, params):
+        assert method == "thread/list"
+        if not params.get("useStateDbOnly"):
+            raise TimeoutError("Rollout reconciliation stalled")
+        if params.get("cursor") == "next":
+            return {"data": [{"id": "older", "source": "vscode"}]}
+        return {"data": [{"id": "recent", "source": "vscode"}], "nextCursor": "next"}
+
+    monkeypatch.setattr(server, "_request", request)
+    threads = await server.list_threads(include_subagents=False)
+    assert [thread.id for thread in threads] == ["recent", "older"]
+
+
 async def test_continuation_reader_discards_content_and_rejects_approval(monkeypatch):
     server = CodexAppServer("test")
     server._turn_events = asyncio.Queue(maxsize=16)
@@ -631,6 +647,20 @@ async def test_shared_workspace_discovery_does_not_rotate_token(monkeypatch):
     with pytest.raises(AppServerError):
         await server.read_account()
     assert request.await_count == 1
+
+
+async def test_transient_workspace_discovery_failure_is_retried(monkeypatch):
+    server = CodexAppServer("shared")
+    request = AsyncMock(
+        side_effect=[
+            AppServerError("workspace routing discovery failed"),
+            {"account": {"id": "owner"}},
+            {"accountId": "owner"},
+        ]
+    )
+    monkeypatch.setattr(server, "_request", request)
+    assert (await server.read_account()).account_id == "owner"
+    assert request.await_count == 3
 
 
 @pytest.mark.parametrize(

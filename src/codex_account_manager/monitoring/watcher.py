@@ -9,7 +9,11 @@ import asyncio
 import time
 
 from codex_account_manager.accounts.service import AccountService
-from codex_account_manager.continuity.policy import SwitchPolicy, resolve_policy
+from codex_account_manager.continuity.policy import (
+    SwitchPolicy,
+    automatic_exclusion_reason,
+    resolve_policy,
+)
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.core.errors import HandoffDeferredError, OperationBusyError
 from codex_account_manager.core.events import bus
@@ -46,6 +50,7 @@ class Watcher:
         self._retry_at = 0.0
         self._retry_delay = 300.0
         self._manual_refresh = False
+        self._last_account_id: str | None = None
 
     def stop(self) -> None:
         def signal() -> None:
@@ -83,7 +88,14 @@ class Watcher:
                 bus.publish("work.observed")
             except Exception:
                 log.warning("Conversation tracking could not be refreshed.")
-        if allow_switch:
+        account_changed = (
+            self._last_account_id is not None
+            and account_id is not None
+            and account_id != self._last_account_id
+        )
+        if account_id is not None:
+            self._last_account_id = account_id
+        if allow_switch and not account_changed:
             if observed:
                 try:
                     await self.continuity.automation.recover_pending(account_id)
@@ -125,6 +137,32 @@ class Watcher:
             self._retry_delay = 300.0
         if time.monotonic() < self._retry_at:
             return
+        health_reader = getattr(self.accounts, "health", None)
+        if health_reader is not None:
+            try:
+                target_health = await health_reader(decision.target.alias)
+            except Exception:
+                log.info(
+                    "Automatic handoff deferred: target account health could not be rechecked."
+                )
+                bus.publish(
+                    "switch.deferred",
+                    detail="Target account health could not be rechecked before the switch.",
+                )
+                return
+            if (
+                not SwitchPolicy._is_available(target_health)
+                or automatic_exclusion_reason(target_health) is not None
+            ):
+                log.info(
+                    "Automatic handoff deferred: target account '%s' is no longer available.",
+                    decision.target.alias,
+                )
+                bus.publish(
+                    "switch.deferred",
+                    detail="The selected target account is no longer available.",
+                )
+                return
         log.info("Policy failover: %s", decision.reason)
         try:
             if current is not None and current.reauth_required:
@@ -177,7 +215,7 @@ class Watcher:
                     self._manual_refresh = False
                     if not enabled:
                         self.continuity._turn_baselines.clear()
-                        await self.continuity.automation.stop()
+                        await self.continuity.automation.stop(clear_pending=True)
                     await self.poll_once(allow_switch=enabled, track_work=enabled or requested)
                 except OperationBusyError:
                     log.debug("Account refresh deferred until the current operation completes.")

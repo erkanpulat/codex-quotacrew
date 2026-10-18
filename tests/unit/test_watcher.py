@@ -90,6 +90,56 @@ async def test_failover_continues_limited_conversation():
     assert continuity.continued == ["hesap2"]
 
 
+async def test_failover_rechecks_target_before_switching():
+    initial = [
+        _health("ana", active=True, allowed=False, quota=QuotaState.LIMITED_WITH_RESET),
+        _health("hesap2", secondary=5.0),
+    ]
+
+    class Accounts(_StubAccounts):
+        async def health(self, alias):
+            assert alias == "hesap2"
+            return _health("hesap2", allowed=False, quota=QuotaState.LIMITED_WITH_RESET)
+
+    continuity = _FakeContinuity()
+    watcher = Watcher(
+        accounts=Accounts(initial),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
+    )
+
+    await watcher.poll_once()
+
+    assert continuity.continued == []
+
+
+async def test_account_change_skips_failover_for_that_poll():
+    health = [
+        _health("ana", active=True, allowed=False, quota=QuotaState.LIMITED_WITH_RESET),
+        _health("hesap2", secondary=5.0),
+    ]
+
+    class Continuity(_FakeContinuity):
+        def __init__(self):
+            super().__init__()
+            self._account_ids = iter(("account-a", "account-b"))
+
+        async def observe_work(self):
+            return next(self._account_ids)
+
+    continuity = Continuity()
+    watcher = Watcher(
+        accounts=_StubAccounts(health),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
+    )
+
+    await watcher.poll_once()
+    await watcher.poll_once()
+
+    assert continuity.continued == ["hesap2"]
+
+
 async def test_failover_records_authentication_recovery():
     from dataclasses import replace
 

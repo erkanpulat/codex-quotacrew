@@ -143,6 +143,69 @@ async def test_quota_failover_never_stops_desktop_before_work_is_safe(
     assert not await service.recent_handoffs()
 
 
+async def test_unverified_sibling_does_not_block_verified_limit_handoff(migrated_db):
+    from unittest.mock import AsyncMock
+
+    service = ContinuityService()
+    service.observe_work = AsyncMock(return_value="acc-1")
+    service._work_verified = False
+    service._work_running = False
+    service._restart_blockers.add("stuck-conversation")
+    service.tracker.limited = AsyncMock(return_value=[("limited-conversation", "turn", "goal")])
+    assert await service._require_restart_safe() == "acc-1"
+
+
+async def test_unprepared_sibling_does_not_block_verified_limit_handoff(migrated_db):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.auth.transaction import SwitchResult
+    from codex_account_manager.continuity.automation import ContinuationTicket
+    from codex_account_manager.core.errors import AppServerError
+    from codex_account_manager.domain.states import TransactionStage
+
+    accounts = AccountService(app_server_factory=_factory("acc-2"))
+    await _seed_two_profiles(migrated_db, accounts)
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(return_value="acc-1")
+    service._work_verified = True
+    service._work_running = False
+    service.tracker.limited = AsyncMock(
+        return_value=[
+            ("good-conversation", "turn-good", "goal-good"),
+            ("stuck-conversation", "turn-stuck", "goal-stuck"),
+        ]
+    )
+    good_ticket = ContinuationTicket("good-conversation", "turn-good", goal_signature="goal-good")
+
+    async def prepare(thread_id):
+        if thread_id == "stuck-conversation":
+            raise AppServerError("native state unavailable")
+        return good_ticket
+
+    service.automation.prepare = prepare
+    service.automation.save_pending = AsyncMock()
+    service.automation.discard_pending = AsyncMock()
+    launched = []
+    service.automation.launch_batch = launched.extend
+    service.handoff = AsyncMock(
+        return_value=SwitchResult(True, TransactionStage.COMMIT, account_id="acc-2")
+    )
+
+    result = await service.continue_on_limit("hesap2")
+
+    assert result.success
+    service.handoff.assert_awaited_once()
+    assert len(launched) == 1
+    assert launched[0] == good_ticket.__class__(
+        good_ticket.thread_id,
+        good_ticket.turn_id,
+        "acc-2",
+        good_ticket.goal_signature,
+        good_ticket.desktop,
+        good_ticket.owner_id,
+    )
+
+
 @pytest.mark.parametrize("change", ["preparation", "target_verification", "unavailable", "paused"])
 async def test_last_restart_check_preserves_work_started_during_handoff(
     migrated_db, monkeypatch, change
@@ -494,6 +557,62 @@ async def test_history_write_failure_after_commit_does_not_report_switch_failure
     assert calls == 2
 
 
+@pytest.mark.parametrize("source_account", ["acc-1", "previous-account"])
+async def test_manual_switch_continues_only_verified_quota_interruptions(
+    migrated_db, monkeypatch, source_account
+):
+    import asyncio
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.errors import DesktopContinuationRequired
+    from codex_account_manager.domain.states import HandoffReason
+
+    accounts = AccountService(app_server_factory=_factory("acc-2"))
+    await _seed_two_profiles(migrated_db, accounts)
+    ids = ("one", "two", "three")
+    fake = FakeAppServer(
+        account_id="acc-1",
+        threads=[replace(_thread(tid, 100), source="vscode") for tid in (*ids, "running")],
+        turns={
+            **{tid: _limited_turn() for tid in ids},
+            "running": {"id": "live-turn", "status": "inProgress"},
+        },
+    )
+    fake.is_desktop_thread = AsyncMock(return_value=True)
+    fake.require_headless_compatible = AsyncMock(side_effect=DesktopContinuationRequired("local"))
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: fake)
+    service = ContinuityService(accounts=accounts)
+    service.automation.factory = lambda: fake
+    service.automation.native.latest_turn = fake.latest_turn
+    for tid in ids:
+        await _observed_running(tid, source_account)
+    sent = []
+
+    async def send(thread_id, source_turn_id):
+        sent.append((thread_id, fake.account_id))
+        fake._turns[thread_id] = {"id": "resumed", "status": "inProgress"}
+        return {"threadId": thread_id}
+
+    service.automation.native.send = send
+    store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
+    store.write_active_atomic(b"source-auth")
+
+    async def verify(_home):
+        fake.account_id = "acc-2"
+        return "acc-2"
+
+    desktop = FakeDesktop()
+    tx = AuthTransaction(credential_store=store, desktop=desktop, verify_account=verify)
+    result = await service.continue_on_limit("hesap2", transaction=tx, reason=HandoffReason.MANUAL)
+    assert result.success
+    await asyncio.gather(*tuple(service.automation.tasks))
+    assert sorted(sent) == [("one", "acc-2"), ("three", "acc-2"), ("two", "acc-2")]
+    assert desktop.stopped == desktop.launched == 1
+    assert not fake.resume_calls
+
+
 async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db, monkeypatch):
     import asyncio
     from dataclasses import replace
@@ -650,6 +769,7 @@ async def test_two_desktop_and_one_ide_limit_continue_after_committed_switch(
     fake.is_desktop_thread = is_desktop
     service.automation.native.latest_turn = native_latest
     service.automation.native.send = native_send
+    service.automation.wait_desktop_channel = lambda _thread_id: asyncio.sleep(0)
     await service.observe_work()
     assert len(await service.tracker.visible()) == 3
     for tid in ids:

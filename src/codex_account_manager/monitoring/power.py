@@ -28,6 +28,7 @@ class PowerEvidence:
 
 MAX_COUNTDOWN_MINUTES = 1440
 CONDITION_COUNTDOWN_SECONDS = 120
+_TERMINAL_STATUSES = frozenset({"completed", "failed", "interrupted", "cancelled"})
 
 
 @dataclass(frozen=True)
@@ -144,17 +145,33 @@ class PowerChecks:
     def __init__(self, accounts: AccountService):
         self.accounts = accounts
 
+    @staticmethod
+    def _may_be_running(status: str | None) -> bool:
+        # Missing or unfamiliar status is not proof that a conversation is idle.
+        # Shutdown must wait for fresh evidence instead of risking active work.
+        return status is None or status not in _TERMINAL_STATUSES
+
     async def conversations(self) -> list[tuple[str, str]]:
         adapter = CodexAppServer(paths.shared_codex_home, experimental=True)
         try:
             async with asyncio.timeout(15):
                 await adapter.start()
                 threads = await adapter.list_threads(max_items=1000)
-                tracked = {work.thread_id for work in await WorkTracker().visible()}
+                from codex_account_manager.adapters.credential_store import FileCredentialStore
+
+                account_id = FileCredentialStore().active_account_hint()
+                tracked = {
+                    work.thread_id
+                    for work in (
+                        await WorkTracker().visible(account_id, verified_only=True)
+                        if account_id
+                        else []
+                    )
+                }
                 return [
-                    (thread.id, thread.title or thread.preview or thread.id[:12])
+                    (thread.id, thread.title or thread.id[:12])
                     for thread in threads
-                    if thread.id in tracked or thread.status not in {"idle", "notLoaded"}
+                    if thread.id in tracked or self._may_be_running(thread.status)
                 ]
         finally:
             await adapter.aclose()
@@ -211,8 +228,18 @@ class PowerChecks:
                 threads = await adapter.list_threads(max_items=1001)
                 if len(threads) >= 1001:
                     return PowerEvidence(False, "Too many conversations to verify safely.")
-                ids = {work.thread_id for work in await WorkTracker().visible()}
-                ids.update(t.id for t in threads if t.status not in {"idle", "notLoaded"})
+                from codex_account_manager.adapters.credential_store import FileCredentialStore
+
+                account_id = FileCredentialStore().active_account_hint()
+                ids = {
+                    work.thread_id
+                    for work in (
+                        await WorkTracker().visible(account_id, verified_only=True)
+                        if account_id
+                        else []
+                    )
+                }
+                ids.update(t.id for t in threads if self._may_be_running(t.status))
                 if target.thread_id:
                     ids.add(target.thread_id)
                 if len(ids) > 20:

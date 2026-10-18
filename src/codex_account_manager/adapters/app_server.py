@@ -307,6 +307,17 @@ class CodexAppServer:
             elif not fut.cancelled():
                 fut.exception()
 
+    async def _request_with_discovery_retry(self, method: str, params: dict | None = None) -> dict:
+        """Retry Codex's transient workspace-routing discovery failure."""
+        for attempt in range(3):
+            try:
+                return await self._request(method, params)
+            except AppServerError as exc:
+                if "workspace routing discovery failed" not in str(exc).casefold() or attempt == 2:
+                    raise
+                await asyncio.sleep(0.25 * (attempt + 1))
+        raise AssertionError("unreachable")
+
     async def _notify(self, method: str, params: dict | None = None) -> None:
         message: dict = {"method": method}
         if params is not None:
@@ -363,7 +374,9 @@ class CodexAppServer:
             raise AppServerError("Forced refresh requires an isolated account profile.")
         refreshed = force_refresh
         try:
-            account_result = await self._request("account/read", {"refreshToken": force_refresh})
+            account_result = await self._request_with_discovery_retry(
+                "account/read", {"refreshToken": force_refresh}
+            )
         except AppServerError as exc:
             if _requires_sign_in(exc):
                 raise SignInRequiredError(
@@ -378,7 +391,9 @@ class CodexAppServer:
             # Discovery can return 401 before the quota request.
             refreshed = True
             try:
-                account_result = await self._request("account/read", {"refreshToken": True})
+                account_result = await self._request_with_discovery_retry(
+                    "account/read", {"refreshToken": True}
+                )
             except AppServerError as retry_error:
                 if _requires_sign_in(retry_error) or re.search(r"\b401\b", str(retry_error)):
                     raise SignInRequiredError(
@@ -392,7 +407,7 @@ class CodexAppServer:
         if not isinstance(account_result["account"], dict):
             raise AppServerError("Codex returned an invalid account response.")
         try:
-            rate_result = await self._request("account/rateLimits/read")
+            rate_result = await self._request_with_discovery_retry("account/rateLimits/read")
         except AppServerError as exc:
             if _requires_sign_in(exc):
                 raise SignInRequiredError(
@@ -406,7 +421,9 @@ class CodexAppServer:
                 ) from exc
             # Let Codex own OAuth rotation; retry only once, never for network/429 errors.
             try:
-                account_result = await self._request("account/read", {"refreshToken": True})
+                account_result = await self._request_with_discovery_retry(
+                    "account/read", {"refreshToken": True}
+                )
                 if account_result.get("account") is None:
                     raise SignInRequiredError(
                         "Codex has no signed-in account. Sign in again in Accounts."
@@ -493,12 +510,11 @@ class CodexAppServer:
                     if include_subagents
                     else []
                 ),
+                "useStateDbOnly": True,
             }
             if cursor:
                 params["cursor"] = cursor
-            if max_items is not None:
-                params["useStateDbOnly"] = True
-            result = await self._request("thread/list", params)
+            result = await self._request_with_discovery_retry("thread/list", params)
             data = result.get("data")
             cursor = result.get("nextCursor")
             if not isinstance(data, list) or any(
@@ -555,7 +571,9 @@ class CodexAppServer:
         return threads
 
     async def thread_source(self, thread_id: str) -> str:
-        result = await self._request("thread/read", {"threadId": thread_id, "includeTurns": False})
+        result = await self._request_with_discovery_retry(
+            "thread/read", {"threadId": thread_id, "includeTurns": False}
+        )
         thread = result.get("thread")
         if not isinstance(thread, dict) or thread.get("id") != thread_id:
             raise AppServerError("Conversation identity could not be verified.")
@@ -574,7 +592,9 @@ class CodexAppServer:
             )
 
     async def is_desktop_thread(self, thread_id: str) -> bool:
-        result = await self._request("thread/read", {"threadId": thread_id, "includeTurns": False})
+        result = await self._request_with_discovery_retry(
+            "thread/read", {"threadId": thread_id, "includeTurns": False}
+        )
         thread = result.get("thread")
         if not isinstance(thread, dict) or thread.get("id") != thread_id:
             raise AppServerError("Conversation identity could not be verified.")
@@ -586,7 +606,9 @@ class CodexAppServer:
 
     async def get_goal(self, thread_id: str) -> GoalInfo | None:
         try:
-            result = await self._request("thread/goal/get", {"threadId": thread_id})
+            result = await self._request_with_discovery_retry(
+                "thread/goal/get", {"threadId": thread_id}
+            )
         except AppServerError:
             return None
         if not isinstance(result, dict) or "goal" not in result:
@@ -651,7 +673,9 @@ class CodexAppServer:
         turn = await self.latest_turn(thread_id)
         if not turn or normalize_turn_status(turn.get("status")) != "interrupted":
             return turn
-        result = await self._request("thread/read", {"threadId": thread_id, "includeTurns": False})
+        result = await self._request_with_discovery_retry(
+            "thread/read", {"threadId": thread_id, "includeTurns": False}
+        )
         thread = result.get("thread") or {}
         if thread.get("id") != thread_id or not isinstance(thread.get("path"), str):
             raise AppServerError("Could not verify the live conversation state.")
@@ -698,7 +722,9 @@ class CodexAppServer:
         turn_id = None
         finished = False
         try:
-            current = await self._request("thread/read", {"threadId": thread_id})
+            current = await self._request_with_discovery_retry(
+                "thread/read", {"threadId": thread_id}
+            )
             thread = current.get("thread") or {}
             if thread.get("id") != thread_id or (thread.get("status") or {}).get("type") != "idle":
                 raise AppServerError("Conversation is already running; no continuation was sent.")

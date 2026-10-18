@@ -6,10 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from codex_account_manager.core.logging import get_logger
 from codex_account_manager.platform import package
 
 APP_USER_MODEL_ID = "CodexAccountManager.Desktop"
 SHELL_LAUNCH_ARGUMENT = "--from-windows-shell"
+log = get_logger(__name__)
 
 
 def launch_from_explorer(executable: Path, arguments: list[str], *, visible: bool = True) -> None:
@@ -43,15 +45,22 @@ def delegate_gui_launch() -> bool:
     if not getattr(sys, "frozen", False):
         executable = executable.with_name("pythonw.exe")
         arguments = ["-m", "codex_account_manager.gui.tray_main", *arguments]
-    launch_from_explorer(executable, arguments)
+    try:
+        launch_from_explorer(executable, arguments)
+    except Exception:
+        log.warning("Explorer delegation is unavailable; continuing in this process.")
+        return False
     return True
 
 
 def set_application_identity() -> None:
     if sys.platform == "win32" and not package.is_packaged():
-        from win32com.shell import shell
+        try:
+            from win32com.shell import shell
 
-        shell.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+            shell.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        except Exception:
+            log.warning("Windows application identity is unavailable; continuing without it.")
 
 
 def create_desktop_shortcut(*, destination: Path | None = None) -> Path:

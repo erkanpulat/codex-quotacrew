@@ -214,6 +214,13 @@ async def test_power_checks_reject_unknown_active_and_truncated_work(migrated_db
     assert not (await checks.check(PowerTarget("limits"))).ready
 
 
+@pytest.mark.parametrize("status", [None, "unknown", "awaitingUser"])
+def test_unknown_work_status_is_conservatively_running(status):
+    from codex_account_manager.monitoring.power import PowerChecks
+
+    assert PowerChecks._may_be_running(status)
+
+
 async def test_limits_mode_allows_stopped_work_with_an_unfinished_goal(migrated_db, monkeypatch):
     from unittest.mock import AsyncMock
 

@@ -300,10 +300,12 @@ class DashboardView(BaseView):
         self.set_loading("work", True)
 
         async def read():
+            from codex_account_manager.adapters.credential_store import FileCredentialStore
             from codex_account_manager.continuity.tracking import WorkTracker
             from codex_account_manager.storage.repositories import ThreadRepository
 
-            work = await WorkTracker().visible()
+            account_id = FileCredentialStore().active_account_hint()
+            work = await WorkTracker().visible(account_id) if account_id else []
             thread = await ThreadRepository().get(work[0].thread_id) if work else None
             return work, thread
 
@@ -312,11 +314,12 @@ class DashboardView(BaseView):
     def _render_work(self, result) -> None:
         from datetime import datetime
 
-        from codex_account_manager.gui.i18n import state_label
+        from codex_account_manager.gui.i18n import state_label, work_status
 
         self._work_busy = False
         work, thread = result
         self.set_loading("work", False)
+        self.work_detail.setToolTip("")
         if not work:
             self.work_title.setText(tr("No verified running work yet"))
             self.work_detail.setText(
@@ -326,15 +329,10 @@ class DashboardView(BaseView):
             )
             return
         selected = work[0]
-        title = (thread.title or thread.preview) if thread else None
+        title = thread.title if thread and thread.title else None
         self.work_title.setText(title or tr("Tracked conversation"))
-        state = (
-            tr("Live state unavailable")
-            if not selected.verified
-            else tr("Limit reached")
-            if selected.limited
-            else state_label(selected.turn_status)
-        )
+        state, detail = work_status(selected)
+        self.work_detail.setToolTip(detail)
         goal = (
             state_label(selected.goal_status or "unknown")
             if selected.goal_present

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from codex_account_manager.continuity.tracking import ObservedWork
+
 _language = "en"
 
 
@@ -577,7 +582,14 @@ TR = {
     "Usage and availability at a glance.": "Hesap kullanımı ve kalan kapasite.",
     "Tracked work": "Takip edilen işler",
     "Open in Codex Desktop": "Codex Desktop'ta aç",
-    "Waiting for Desktop continuation": "Desktop'ta devam bekleniyor",
+    "Continuation queued": "Devam sırada",
+    "Checking continuation": "Devam doğrulanıyor",
+    "Check in Codex": "Codex'te kontrol gerekli",
+    "The continuation is queued. The connection and conversation will be checked before sending.": "Devam isteği sırada. Gönderimden önce bağlantı ve konuşmanın durumu kontrol ediliyor.",
+    "The last request has no confirmed result yet. It will not be sent again automatically. Open the conversation in Codex Desktop to check.": "Son isteğin sonucu henüz doğrulanmadı. Aynı istek otomatik olarak tekrar gönderilmeyecek. Konuşmayı Codex Desktop'ta açıp kontrol edin.",
+    "The continuation request was sent, but resumed work has not been verified. It will not be sent again automatically. Open the conversation in Codex Desktop to check.": "Devam isteği gönderildi, ancak işin devam ettiği doğrulanmadı. Aynı istek otomatik olarak tekrar gönderilmeyecek. Konuşmayı Codex Desktop'ta açıp kontrol edin.",
+    "The last continuation attempt could not be verified. It will not be sent again automatically. Open the conversation in Codex Desktop to check.": "Son devam denemesinin sonucu doğrulanamadı. Aynı istek otomatik olarak tekrar gönderilmeyecek. Konuşmayı Codex Desktop'ta açıp kontrol edin.",
+    "No automatic continuation is queued. Open the conversation in Codex Desktop to check and continue it.": "Sırada otomatik devam isteği yok. Konuşmayı Codex Desktop'ta açıp kontrol edin ve devam ettirin.",
     "Codex Desktop could not be opened. Open the conversation from Codex.": "Codex Desktop açılamadı. Konuşmayı Codex içinden açın.",
     "CLI continuation": "CLI konuşmalarını devam ettir",
     "Applies to CLI conversations. Desktop conversations must continue in Codex Desktop.": "CLI konuşmaları için geçerlidir. Masaüstü konuşmalarına Codex Desktop içinde devam edilmelidir.",
@@ -877,6 +889,44 @@ _STATE_LABELS = {
 def state_label(value: str) -> str:
     labels = _STATE_LABELS.get(value)
     return labels[language() == "tr"] if labels else value
+
+
+def work_status(work: ObservedWork) -> tuple[str, str]:
+    if work.turn_status == "awaitingDesktop":
+        if work.continuation_status == "submitted":
+            label, detail = (
+                "Continuation sent",
+                "The continuation request was sent, but resumed work has not been verified. It will not be sent again automatically. Open the conversation in Codex Desktop to check.",
+            )
+        elif work.continuation_status == "sending":
+            label, detail = (
+                "Checking continuation",
+                "The last request has no confirmed result yet. It will not be sent again automatically. Open the conversation in Codex Desktop to check.",
+            )
+        elif work.continuation_status == "uncertain":
+            label, detail = (
+                "Check in Codex",
+                "The last continuation attempt could not be verified. It will not be sent again automatically. Open the conversation in Codex Desktop to check.",
+            )
+        elif work.continuation_pending:
+            label, detail = (
+                "Continuation queued",
+                "The continuation is queued. The connection and conversation will be checked before sending.",
+            )
+        else:
+            label, detail = (
+                "Check in Codex",
+                "No automatic continuation is queued. Open the conversation in Codex Desktop to check and continue it.",
+            )
+        explanation = tr(detail)
+        if not work.verified:
+            explanation += " " + tr("Live state unavailable")
+        return tr(label), explanation
+    if work.unavailable_reason == "owner_unavailable":
+        return tr("Owner unavailable; retrying later"), ""
+    if not work.verified:
+        return tr("Live state unavailable"), ""
+    return tr("Limit reached") if work.limited else state_label(work.turn_status), ""
 
 
 def diagnostic_detail(name: str, ok: bool, detail: str) -> str:

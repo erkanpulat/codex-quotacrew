@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.2.7 — 2026-10-16
+## 0.2.7 — 2026-10-18
 
-- Stabilize Desktop continuation after restart and retain unavailable conversation checks without repeated polling.
+- Isolate unavailable conversations so one job does not block eligible account switches or independent continuations.
+- Preserve unsent continuation requests across application exits and check Desktop readiness before sending.
+- Improve work discovery, manual-switch tracking and conditional shutdown checks.
+- Handle Windows shell launch failures without terminating startup.
+- Distinguish queued, submitted and unverified continuation requests in Jobs and Overview; explain when a conversation needs manual attention.
 
 ## 0.2.6 — 2026-10-16
 

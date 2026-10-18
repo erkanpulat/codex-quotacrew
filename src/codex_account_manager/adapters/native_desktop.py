@@ -172,7 +172,7 @@ def _exchange(payload: dict, cancelled: threading.Event, timeout: float) -> dict
             if handle is not opened:
                 opened.Close()
     if handle is None:
-        raise AppServerError("The verified Desktop native channel is unavailable.")
+        raise ConnectionNotReadyError("The verified Desktop native channel is unavailable.")
     from codex_account_manager.adapters.windows_pipe import FramedPipe
 
     with FramedPipe(handle, cancelled, timeout, MAX_FRAME) as pipe:
@@ -181,6 +181,9 @@ def _exchange(payload: dict, cancelled: threading.Event, timeout: float) -> dict
 
 
 class NativeDesktop:
+    def __init__(self) -> None:
+        self._exchange_lock = asyncio.Lock()
+
     async def call(self, thread_id: str, source_turn_id: str, *, send: bool = False) -> dict:
         if not IDENTIFIER.fullmatch(thread_id) or not IDENTIFIER.fullmatch(source_turn_id):
             raise AppServerError("Invalid native conversation identity.")
@@ -211,11 +214,22 @@ class NativeDesktop:
             },
         }
         cancelled = threading.Event()
-        try:
-            result = await asyncio.to_thread(_exchange, payload, cancelled, 15.0)
-            return decode_result(result, request_id)
-        finally:
-            cancelled.set()
+        async with self._exchange_lock:
+            exchange_task = asyncio.create_task(
+                asyncio.to_thread(_exchange, payload, cancelled, 60.0 if send else 15.0)
+            )
+            try:
+                result = await asyncio.shield(exchange_task)
+                return decode_result(result, request_id)
+            except asyncio.CancelledError:
+                cancelled.set()
+                try:
+                    await exchange_task
+                except BaseException:
+                    pass
+                raise
+            finally:
+                cancelled.set()
 
     async def latest_turn(self, thread_id: str) -> dict:
         for attempt in range(3):

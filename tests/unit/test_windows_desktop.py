@@ -28,6 +28,7 @@ def test_desktop_registration_checks_current_user_without_launching(
     from unittest.mock import Mock
 
     monkeypatch.setattr(windows, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(windows, "_desktop_processes", lambda: [])
 
     def query(family, count_pointer, names, _length_pointer, buffer):
         assert family == "OpenAI.Codex_2p2nqsd0c76g0"
@@ -50,6 +51,12 @@ def test_desktop_registration_checks_current_user_without_launching(
     else:
         assert native_desktop_installed() is expected
     launch.assert_not_called()
+
+
+def test_running_packaged_desktop_is_installation_evidence(monkeypatch):
+    monkeypatch.setattr(windows, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(windows, "_desktop_processes", lambda: [object()])
+    assert native_desktop_installed()
 
 
 async def test_missing_desktop_stops_switch_before_credentials_or_recovery_change(
@@ -371,8 +378,10 @@ def test_native_process_signal_and_handle_cleanup(monkeypatch, wait_result, expe
     assert closed == [True]
 
 
-@pytest.mark.parametrize("error_code", [87, 5])
-def test_native_process_open_failure_never_assumes_access_denied_is_exit(monkeypatch, error_code):
+@pytest.mark.parametrize("error_code, expected", [(87, True), (5, False)])
+def test_native_process_open_failure_keeps_access_denied_process_alive(
+    monkeypatch, error_code, expected
+):
     class WindowsError(OSError):
         winerror = error_code
 
@@ -380,15 +389,15 @@ def test_native_process_open_failure_never_assumes_access_denied_is_exit(monkeyp
         raise WindowsError()
 
     monkeypatch.setitem(sys.modules, "pywintypes", SimpleNamespace(error=WindowsError))
-    monkeypatch.setitem(sys.modules, "winerror", SimpleNamespace(ERROR_INVALID_PARAMETER=87))
+    monkeypatch.setitem(
+        sys.modules,
+        "winerror",
+        SimpleNamespace(ERROR_INVALID_PARAMETER=87, ERROR_ACCESS_DENIED=5),
+    )
     monkeypatch.setitem(sys.modules, "win32api", SimpleNamespace(OpenProcess=opened))
     monkeypatch.setitem(sys.modules, "win32con", SimpleNamespace(SYNCHRONIZE=0x100000))
     monkeypatch.setitem(sys.modules, "win32event", SimpleNamespace())
-    if error_code == 87:
-        assert _process_has_exited(123)
-    else:
-        with pytest.raises(WindowsError):
-            _process_has_exited(123)
+    assert _process_has_exited(123) is expected
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows process handles")

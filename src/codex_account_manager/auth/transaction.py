@@ -217,12 +217,14 @@ class AuthTransaction:
                 f"Profile '{target.alias}' has no auth.json to activate.", stage="prepare"
             )
         if isinstance(self.desktop, WindowsDesktopLauncher):
+            desktop_was_running = self.desktop.is_running()
             if self._launch_requested is None:
                 from codex_account_manager.platform.windows import is_desktop_installed
 
                 # Desktop is an optional surface. CLI and IDE account activation
                 # must work without installing or attempting to launch it.
                 self.launch_desktop = await asyncio.to_thread(is_desktop_installed)
+                self.launch_desktop = self.launch_desktop or desktop_was_running
         if self.launch_desktop and isinstance(self.desktop, WindowsDesktopLauncher):
             # Resolve the dependency before checking/rotating credentials, writing
             # a recovery snapshot, or stopping any application.

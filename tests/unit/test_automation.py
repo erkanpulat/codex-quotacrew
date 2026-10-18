@@ -151,15 +151,64 @@ async def test_pending_recovery_never_replays_unsafe_work(migrated_db, changed):
         assert not await (await db.execute("SELECT * FROM pending_continuations")).fetchall()
 
 
-async def test_stopping_monitoring_discards_waiting_tickets_before_reenable(migrated_db):
+async def test_desktop_channel_failure_keeps_ticket_for_recovery(migrated_db):
+    from dataclasses import replace
+
+    from codex_account_manager.core.errors import AppServerError
+
+    server = ExecutionServer()
+    supervisor = ContinuationSupervisor(factory=lambda: server)
+    ticket = replace(await prepared(supervisor), desktop=True)
+    await supervisor.save_pending([ticket])
+
+    async def unavailable(_ticket):
+        raise AppServerError("The verified Desktop native channel is unavailable.")
+
+    supervisor.run = unavailable
+    supervisor.launch_batch([ticket])
+    await asyncio.gather(*tuple(supervisor.tasks))
+
+    async with connect() as db:
+        rows = await (await db.execute("SELECT thread_id FROM pending_continuations")).fetchall()
+    assert rows == [(ticket.thread_id,)]
+
+
+async def test_stopping_monitoring_can_discard_waiting_tickets_before_reenable(migrated_db):
     server = ExecutionServer()
     supervisor = ContinuationSupervisor(factory=lambda: server)
     await supervisor.save_pending([await prepared(supervisor)])
-    await supervisor.stop()
+    await supervisor.stop(clear_pending=True)
     await supervisor.recover_pending("acc-1")
     assert not supervisor.tasks and not server.turn_calls
     async with connect() as db:
         assert not await (await db.execute("SELECT * FROM pending_continuations")).fetchall()
+
+
+async def test_cancelled_desktop_lane_keeps_unstarted_tickets_for_recovery(migrated_db):
+    import asyncio
+    from dataclasses import replace
+
+    supervisor = ContinuationSupervisor(factory=lambda: ExecutionServer())
+    first = replace(await prepared(supervisor), desktop=True, thread_id="first")
+    second = replace(first, thread_id="second")
+    await supervisor.save_pending([first, second])
+    started = asyncio.Event()
+
+    async def blocked(ticket):
+        started.set()
+        await asyncio.Event().wait()
+
+    supervisor.run = blocked
+    supervisor.launch_batch([first, second])
+    task = next(iter(supervisor.tasks))
+    await asyncio.wait_for(started.wait(), 2)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    async with connect() as db:
+        rows = await (
+            await db.execute("SELECT thread_id FROM pending_continuations ORDER BY thread_id")
+        ).fetchall()
+    assert rows == [("first",), ("second",)]
 
 
 async def test_limit_during_owned_continuation_remains_eligible_for_next_handoff(migrated_db):

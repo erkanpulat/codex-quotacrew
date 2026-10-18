@@ -39,6 +39,8 @@ class ObservedWork:
     observed_at: float
     verified: bool = True
     unavailable_reason: str | None = None
+    continuation_pending: bool = False
+    continuation_status: str | None = None
 
 
 class WorkTracker:
@@ -55,7 +57,9 @@ class WorkTracker:
         await self.forget()
         bus.publish("work.observed")
 
-    async def visible(self) -> list[ObservedWork]:
+    async def visible(
+        self, account_id: str | None = None, *, verified_only: bool = False
+    ) -> list[ObservedWork]:
         from codex_account_manager.monitoring.settings import poll_interval
         from codex_account_manager.storage.repositories import SettingsRepository
 
@@ -65,10 +69,33 @@ class WorkTracker:
             rows = await (
                 await db.execute(
                     """SELECT thread_id, account_hash, turn_status, goal_fingerprint,
-                goal_status, limited, observed_at, verified, unavailable_reason FROM observed_work
-                WHERE account_hash <> '' AND observed_at >= ?
+                goal_status, limited, observed_at, verified, unavailable_reason,
+                EXISTS(
+                    SELECT 1 FROM pending_continuations AS pending
+                    WHERE pending.thread_id=observed_work.thread_id
+                      AND pending.turn_id=observed_work.turn_id
+                      AND pending.created_at > ? AND pending.created_at <= ?
+                ),
+                (
+                    SELECT attempts.status FROM continuation_attempts AS attempts
+                    WHERE attempts.thread_id=observed_work.thread_id
+                      AND attempts.source_turn_id=observed_work.turn_id
+                )
+                FROM observed_work
+                    WHERE account_hash <> '' AND observed_at >= ?
+                      AND (? = 0 OR (verified=1 AND observed_at BETWEEN ? AND ?))
+                  AND (? IS NULL OR account_hash = ?)
                 ORDER BY observed_at DESC LIMIT 50""",
-                    (time.time() - 86400,),
+                    (
+                        now - 600,
+                        now,
+                        now - 86400,
+                        int(verified_only),
+                        now - freshness,
+                        now,
+                        account_id,
+                        account_hash(account_id) if account_id else None,
+                    ),
                 )
             ).fetchall()
         return [
@@ -82,6 +109,8 @@ class WorkTracker:
                 observed_at=row[6],
                 verified=bool(row[7]) and 0 <= now - row[6] <= freshness,
                 unavailable_reason=row[8],
+                continuation_pending=bool(row[9]),
+                continuation_status=row[10],
             )
             for row in rows
         ]
@@ -212,7 +241,10 @@ class WorkTracker:
             turn_id = turn.get("id") if turn else None
             signature = goal_signature(goal) if goal is not None else None
             if row and row[0] != source:
-                if status != "inProgress":
+                if status != "inProgress" and limited and signature == row[3]:
+                    source = row[0]
+                    new_turn = new_turn or row[1] != turn_id
+                elif status != "inProgress":
                     # Retire completed work from the previous account.
                     if (
                         status == "completed"
@@ -225,7 +257,8 @@ class WorkTracker:
                         )
                         await db.commit()
                     return
-                row = None
+                else:
+                    row = None
             await db.execute("DELETE FROM conversation_cooldowns WHERE thread_id=?", (thread_id,))
             if (
                 row
@@ -288,20 +321,39 @@ class WorkTracker:
                 await db.execute("DELETE FROM observed_work WHERE thread_id=?", (thread_id,))
             await db.commit()
 
+    async def unfinished(self) -> list[tuple[str, str, str]]:
+        async with connect() as db:
+            rows = await (
+                await db.execute(
+                    """SELECT thread_id, turn_id, goal_fingerprint FROM observed_work
+                WHERE account_hash <> '' AND observed_at >= ? ORDER BY observed_at DESC""",
+                    (time.time() - 86400,),
+                )
+            ).fetchall()
+        return [(row[0], row[1], row[2]) for row in rows]
+
     async def await_desktop(
-        self, source_account: str, target_account: str, thread_ids: list[str]
+        self,
+        source_account: str | None,
+        target_account: str,
+        thread_ids: list[str],
+        *,
+        turn_ids: dict[str, str] | None = None,
     ) -> None:
         if not thread_ids:
             return
         async with connect() as db:
             await db.executemany(
                 """UPDATE observed_work SET account_hash=?, turn_status='awaitingDesktop',
-                limited=0, observed_at=? WHERE account_hash=? AND thread_id=? AND limited=1""",
+                turn_id=COALESCE(?, turn_id), limited=0, observed_at=?
+                WHERE (? IS NULL OR (account_hash=? AND limited=1)) AND thread_id=?""",
                 [
                     (
                         account_hash(target_account),
+                        (turn_ids or {}).get(thread_id),
                         time.time(),
-                        account_hash(source_account),
+                        account_hash(source_account) if source_account is not None else None,
+                        account_hash(source_account) if source_account is not None else None,
                         thread_id,
                     )
                     for thread_id in thread_ids
