@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from codex_account_manager.continuity.automation import (
     ContinuationTicket,
     has_verified_limit_turn,
 )
+from codex_account_manager.continuity.scan import ACTIVE_THREAD_STATES, ConversationScan
 from codex_account_manager.continuity.tracking import WorkTracker, goal_signature
 from codex_account_manager.core.errors import (
     AppServerError,
@@ -74,6 +76,8 @@ class ContinuityService:
         self._unavailable_independent: set[str] = set()
         self._restart_blockers: set[str] = set()
         self._turn_baselines: dict[str, tuple[str, str, str, int]] = {}
+        self._scan = ConversationScan()
+        self._observation_lock = asyncio.Lock()
 
     async def sync_threads(self) -> list[ThreadRecord]:
         """Read threads from the App Server and persist lightweight records."""
@@ -123,6 +127,10 @@ class ContinuityService:
 
     async def observe_work(self) -> str | None:
         """Refresh running and interrupted work before evaluating account failover."""
+        async with self._observation_lock:
+            return await self._observe_serialized()
+
+    async def _observe_serialized(self) -> str | None:
         self._work_running = False
         self._work_verified = False
         self._restart_independent.clear()
@@ -166,41 +174,16 @@ class ContinuityService:
 
             sources: dict[str, str | None] = {i.id: i.source for i in infos if i.source}
 
-            active_threads = [
-                i
-                for i in infos
-                if i.id
-                and not (i.source or "").startswith("subAgent")
-                and i.status in {"inProgress", "awaitingUser", "paused"}
-                and i.source in {"cli", "exec", "appServer", "vscode", "unknown", None}
-            ]
-
-            active_threads = sorted(
-                active_threads,
-                key=lambda i: i.recency_at or i.updated_at or 0,
-                reverse=True,
-            )
-
-            other_threads = [
-                i
-                for i in infos
-                if i.id
-                and not (i.source or "").startswith("subAgent")
-                and i.status not in {"inProgress", "awaitingUser", "paused"}
-            ]
-            other_threads = sorted(
-                other_threads,
-                key=lambda i: i.recency_at or i.updated_at or 0,
-                reverse=True,
-            )
-
-            candidates = active_threads + other_threads[:20]
-
             tracked = await self.tracker.ids()
+            tracked_ids = set(tracked)
+            active_ids = {i.id for i in infos if i.status in ACTIVE_THREAD_STATES}
             cooling_down = await self.tracker.cooling_down_ids()
-            self._restart_blockers.update(set(tracked) & cooling_down)
-            selected = list(dict.fromkeys([*tracked, *(i.id for i in candidates)]))
-            selected = [thread_id for thread_id in selected if thread_id not in cooling_down]
+            selected = [
+                thread_id
+                for thread_id in self._scan.select(infos, tracked)
+                if thread_id not in cooling_down
+            ]
+            self._restart_blockers.update((tracked_ids | active_ids) - set(selected))
 
             for thread_id in tracked:
                 if thread_id not in sources:
@@ -212,6 +195,7 @@ class ContinuityService:
             unavailable = 0
             unsupported = 0
             completed: set[str] = set()
+            failures: Counter[str] = Counter()
 
             semaphore = asyncio.Semaphore(THREAD_CHECK_CONCURRENCY)
 
@@ -237,6 +221,7 @@ class ContinuityService:
                             }:
                                 unsupported += 1
                                 completed.add(thread_id)
+                                self._scan.succeeded(thread_id)
                                 return
 
                             if source == "vscode":
@@ -245,13 +230,17 @@ class ContinuityService:
                                     if not await self.automation.ide_enabled():
                                         unsupported += 1
                                         completed.add(thread_id)
+                                        self._scan.succeeded(thread_id)
                                         return
                                     turn, _owner = await self.automation.owner_turn(
                                         adapter, thread_id
                                     )
                                 else:
                                     turn = await verified_desktop_turn(
-                                        self.automation.native, adapter, thread_id
+                                        self.automation.native,
+                                        adapter,
+                                        thread_id,
+                                        prefer_stored=True,
                                     )
                                 goal = await adapter.get_goal(thread_id) if turn else None
                             else:
@@ -307,19 +296,19 @@ class ContinuityService:
                             )
                             checked += 1
                             completed.add(thread_id)
+                            self._scan.succeeded(thread_id)
 
                     except OwnerNotFoundError:
                         await self.tracker.mark_unavailable(thread_id, "owner_unavailable")
                         if thread_id in self._restart_independent:
                             completed.add(thread_id)
                         unavailable += 1
-                        log.info("Conversation owner unavailable; retrying after cooldown.")
+                        failures["OwnerNotFoundError"] += 1
 
                     except Exception as exc:
+                        self._scan.failed(thread_id)
                         unavailable += 1
-                        log.warning(
-                            "Could not verify an observed conversation (%s).", type(exc).__name__
-                        )
+                        failures[type(exc).__name__] += 1
 
             try:
                 async with asyncio.timeout(THREAD_SCAN_TIMEOUT):
@@ -328,10 +317,19 @@ class ContinuityService:
                             group.create_task(inspect(thread_id))
             except TimeoutError:
                 unavailable = len(selected) - checked - unsupported
+                failures["ScanTimeout"] += 1
+            if failures:
+                log.warning(
+                    "Conversation check: %d verified, %d unavailable (%s).",
+                    checked,
+                    unavailable,
+                    ", ".join(f"{name}={count}" for name, count in sorted(failures.items())),
+                )
             incomplete = set(selected) - completed
-            await self.tracker.unverified(list(incomplete))
-            self._unavailable_independent = incomplete & self._restart_independent
-            self._restart_blockers.update(incomplete - self._restart_independent)
+            relevant_incomplete = incomplete & (tracked_ids | active_ids)
+            await self.tracker.unverified(list(relevant_incomplete))
+            self._unavailable_independent = relevant_incomplete & self._restart_independent
+            self._restart_blockers.update(relevant_incomplete - self._restart_independent)
             self._work_verified = not self._restart_blockers
             bus.publish("work.observed")
             bus.publish(
@@ -502,14 +500,28 @@ class ContinuityService:
         try:
             account_id = await self.observe_work()
         except Exception as exc:
+            try:
+                account_id = await self.accounts._active_account_id_safe()
+                if account_id is None:
+                    account_id = self.accounts.credentials.active_account_hint()
+                exhausted = await self._source_requires_switch(account_id)
+            except Exception:
+                exhausted = False
+            if self._work_running or not exhausted:
+                raise HandoffDeferredError(
+                    "Account switch is waiting: conversation state could not be verified. Codex remains open."
+                ) from exc
+        if expected_account_id is not None and account_id != expected_account_id:
             raise HandoffDeferredError(
-                "Account switch is waiting: conversation state could not be verified. Codex remains open."
-            ) from exc
+                "Account switch is waiting: the active account changed. Codex remains open."
+            )
         for thread_id in self._restart_blockers:
             await self.automation.report(thread_id, "waiting_shared", "desktop_restart")
         if not self._work_verified:
             eligible = await self.tracker.limited(account_id) if account_id else []
-            if eligible and not self._work_running:
+            if not self._work_running and (
+                eligible or await self._source_requires_switch(account_id)
+            ):
                 for thread_id in self._restart_blockers:
                     await self.automation.report(thread_id, "needs_user", "verification")
                 return account_id
@@ -520,11 +532,24 @@ class ContinuityService:
             raise HandoffDeferredError(
                 "Account switch is waiting for running conversations to finish or report their limit. Codex remains open."
             )
-        if expected_account_id is not None and account_id != expected_account_id:
-            raise HandoffDeferredError(
-                "Account switch is waiting: the active account changed. Codex remains open."
-            )
         return account_id
+
+    async def _source_requires_switch(self, account_id: str | None) -> bool:
+        if not account_id:
+            return False
+        from codex_account_manager.codex.quota import evaluate_quota
+        from codex_account_manager.domain.states import QuotaState
+
+        try:
+            snapshot = await self.accounts.read_snapshot(paths.shared_codex_home)
+            return snapshot.account_id == account_id and evaluate_quota(snapshot).state in {
+                QuotaState.LIMITED_WITH_RESET,
+                QuotaState.LIMITED_NO_RESET,
+            }
+        except SignInRequiredError:
+            return self.accounts.credentials.active_account_hint() == account_id
+        except Exception:
+            return False
 
     async def continue_on_limit(
         self,
@@ -541,7 +566,12 @@ class ContinuityService:
         async def verify_source(expected: str | None = None) -> str | None:
             if reason != HandoffReason.MANUAL:
                 return await self._require_restart_safe(expected)
-            current = await self.observe_work()
+            try:
+                current = await self.observe_work()
+            except Exception:
+                current = await self.accounts._active_account_id_safe()
+                if current is None:
+                    current = self.accounts.credentials.active_account_hint()
             if expected is not None and current != expected:
                 raise HandoffDeferredError("The active account changed before the manual switch.")
             return current
@@ -565,7 +595,6 @@ class ContinuityService:
         )
         tickets = []
         preparation_failed = bool(self._unavailable_independent)
-        restart_blocked = False
         for thread_id in self._unavailable_independent:
             await self.automation.report(thread_id, "needs_user", "verification")
         desktop_threads: list[str] = []
@@ -587,15 +616,9 @@ class ContinuityService:
                 elif ticket:
                     await self.automation.report(thread_id, "needs_user", "verification")
                     preparation_failed = True
-                    restart_blocked |= thread_id not in self._restart_independent
             except Exception:
                 preparation_failed = True
-                restart_blocked |= thread_id not in self._restart_independent
                 await self.automation.report(thread_id, "needs_user", "preparation")
-        if restart_blocked and not (desktop_tickets or tickets):
-            raise HandoffDeferredError(
-                "Account switch is waiting: continuation could not be prepared. Codex remains open."
-            )
         target = await self.profiles.get_by_alias(target_alias)
         if not target or not target.bound_account_id:
             raise AppServerError("The target account identity could not be verified.")
@@ -631,13 +654,12 @@ class ContinuityService:
                     desktop_threads,
                     turn_ids={ticket.thread_id: ticket.turn_id for ticket in desktop_tickets},
                 )
-                await self.automation.wait_desktop_channel(desktop_threads[0])
                 bus.publish("work.observed")
                 ready_desktop = desktop_tickets
             except Exception as exc:
                 deferred_desktop = desktop_tickets
                 log.warning(
-                    "Account switch committed; Desktop channel is not ready; keeping work pending (%s).",
+                    "Account switch committed; continuation tracking could not be updated (%s).",
                     type(exc).__name__,
                 )
                 bus.publish("continuation.status", state="waiting_connection", stage="desktop")

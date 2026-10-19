@@ -12,6 +12,29 @@ from tests.fakes import FakeAppServer
 from tests.unit.test_watcher import _health
 
 
+async def test_shared_routing_error_preserves_active_identity_and_failure(migrated_db):
+    from codex_account_manager.core.errors import AppServerError
+
+    service = AccountService()
+    profile = await service.create_profile("active")
+    await service.profiles.bind_account(profile.id, "active-id")
+    service.credentials.write_active_atomic(b'{"tokens":{"account_id":"active-id"}}')
+    service.credentials.profile_auth_path(profile.codex_home).write_bytes(b"{}")
+    healthy = await FakeAppServer(account_id="active-id").read_account()
+
+    async def read(home, **kwargs):
+        if str(home) == str(migrated_db.shared_codex_home):
+            raise AppServerError("workspace routing discovery unauthorized (401)")
+        return healthy
+
+    service.read_snapshot = read
+    health = (await service.all_health())[0]
+    assert health.is_active
+    assert health.error and "401" in health.error
+    assert health.ordinary_usage_allowed is None
+    assert not health.reauth_required
+
+
 async def test_rejected_profile_stays_rejected_until_credentials_change(migrated_db):
     service = AccountService(app_server_factory=lambda _: FakeAppServer(account_id="target"))
     profile = await service.create_profile("target")
@@ -168,6 +191,93 @@ async def test_rejected_auth_does_not_bypass_running_work_guard(migrated_db):
     service._work_verified = True
     service._work_running = True
     with pytest.raises(HandoffDeferredError, match="running conversations"):
+        await service._require_restart_safe("source")
+
+
+async def test_rejected_source_can_escape_unreadable_history(migrated_db):
+    from codex_account_manager.continuity.service import ContinuityService
+
+    accounts = AccountService()
+    accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source"}}')
+    accounts.read_snapshot = AsyncMock(side_effect=SignInRequiredError("session rejected"))
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(side_effect=SignInRequiredError("routing rejected"))
+    assert await service._require_restart_safe("source") == "source"
+
+
+async def test_routing_401_does_not_authorize_automatic_restart(migrated_db):
+    from codex_account_manager.adapters.app_server import CodexAppServer
+    from codex_account_manager.continuity.service import ContinuityService
+    from codex_account_manager.core.errors import AppServerError, HandoffDeferredError
+
+    server = CodexAppServer(migrated_db.shared_codex_home)
+    server._request = AsyncMock(
+        side_effect=AppServerError("workspace routing discovery unauthorized (401)")
+    )
+    accounts = AccountService()
+    accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source"}}')
+
+    async def read(*args, **kwargs):
+        return await server.read_account()
+
+    accounts.read_snapshot = read
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(side_effect=AppServerError("history unavailable"))
+    with pytest.raises(HandoffDeferredError):
+        await service._require_restart_safe("source")
+
+
+async def test_unreadable_tracking_does_not_veto_fresh_exhausted_account(migrated_db):
+    from codex_account_manager.continuity.service import ContinuityService
+
+    accounts = AccountService(
+        app_server_factory=lambda _: FakeAppServer(
+            account_id="source", ordinary_usage_allowed=False
+        )
+    )
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(side_effect=TimeoutError("history unavailable"))
+    assert await service._require_restart_safe("source") == "source"
+
+
+async def test_manual_switch_survives_source_routing_401(migrated_db):
+    from codex_account_manager.auth.transaction import SwitchResult
+    from codex_account_manager.continuity.service import ContinuityService
+    from codex_account_manager.core.errors import AppServerError
+    from codex_account_manager.domain.states import HandoffReason, TransactionStage
+
+    accounts = AccountService()
+    target = await accounts.create_profile("target")
+    await accounts.profiles.bind_account(target.id, "target-id")
+    accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source-id"}}')
+    accounts.active_account_id = AsyncMock(
+        side_effect=AppServerError("workspace routing discovery unauthorized (401)")
+    )
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(
+        side_effect=AppServerError("workspace routing discovery unauthorized (401)")
+    )
+
+    async def handoff(_alias, **kwargs):
+        await kwargs["before_desktop_stop"]()
+        return SwitchResult(True, TransactionStage.COMMIT, account_id="target-id")
+
+    service.handoff = AsyncMock(side_effect=handoff)
+    result = await service.continue_on_limit("target", reason=HandoffReason.MANUAL)
+    assert result.success
+    service.handoff.assert_awaited_once()
+
+
+async def test_unreadable_tracking_never_authorizes_switch_when_quota_is_available(migrated_db):
+    from codex_account_manager.continuity.service import ContinuityService
+    from codex_account_manager.core.errors import HandoffDeferredError
+
+    accounts = AccountService(
+        app_server_factory=lambda _: FakeAppServer(account_id="source", ordinary_usage_allowed=True)
+    )
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(side_effect=TimeoutError("history unavailable"))
+    with pytest.raises(HandoffDeferredError):
         await service._require_restart_safe("source")
 
 

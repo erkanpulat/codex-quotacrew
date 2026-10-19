@@ -6,6 +6,8 @@ import json
 import time
 from pathlib import Path
 
+from codex_account_manager.core.files import resolved_path
+
 _MAX_TAIL_BYTES = 4 * 1024 * 1024
 _FRESH_SECONDS = 120
 _TERMINAL_EVENTS = {
@@ -17,10 +19,8 @@ _TERMINAL_EVENTS = {
 
 def read_turn_activity(rollout: str, codex_home: Path, turn_id: str) -> str:
     """Return a verified lifecycle state, or unknown; never retain message content."""
-    if rollout.startswith("\\\\?\\") and len(rollout) > 5 and rollout[5] == ":":
-        rollout = rollout[4:]
-    path = Path(rollout).resolve()
-    if path.suffix != ".jsonl" or not path.is_relative_to((codex_home / "sessions").resolve()):
+    path = resolved_path(rollout)
+    if path.suffix != ".jsonl" or not path.is_relative_to(resolved_path(codex_home / "sessions")):
         return "unknown"
     try:
         before = path.stat()

@@ -6,7 +6,21 @@ import os
 import stat
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+
+def resolved_path(value: str | Path) -> Path:
+    """Resolve filesystem aliases before comparing Windows path containment."""
+
+    def ordinary(path: str) -> str:
+        if path.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + path[8:]
+        if path.startswith("\\\\?\\") and len(path) > 5 and path[5] == ":":
+            return path[4:]
+        return path
+
+    return Path(ordinary(str(Path(ordinary(str(value))).resolve())))
 
 
 def restrict_access(path: Path) -> None:
@@ -60,7 +74,15 @@ def atomic_write(path: Path, data: bytes) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        for attempt in range(4):
+            try:
+                os.replace(temporary, path)
+                break
+            except OSError as exc:
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 3:
+                    raise
+                # Windows readers can briefly deny replacement; never remove the original.
+                time.sleep(0.02 * 2**attempt)
         if sys.platform != "win32":
             directory = os.open(path.parent, os.O_RDONLY)
             try:

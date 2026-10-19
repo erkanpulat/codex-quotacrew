@@ -96,7 +96,8 @@ class Watcher:
         if account_id is not None:
             self._last_account_id = account_id
         if allow_switch and not account_changed:
-            if observed:
+            current = next((h for h in health if h.is_active), None)
+            if observed and current is not None and SwitchPolicy._is_available(current):
                 try:
                     await self.continuity.automation.recover_pending(account_id)
                 except Exception:
@@ -138,31 +139,33 @@ class Watcher:
         if time.monotonic() < self._retry_at:
             return
         health_reader = getattr(self.accounts, "health", None)
-        if health_reader is not None:
+        candidates = list(health)
+        while health_reader is not None:
             try:
                 target_health = await health_reader(decision.target.alias)
             except Exception:
-                log.info(
-                    "Automatic handoff deferred: target account health could not be rechecked."
-                )
-                bus.publish(
-                    "switch.deferred",
-                    detail="Target account health could not be rechecked before the switch.",
-                )
-                return
+                target_health = None
             if (
-                not SwitchPolicy._is_available(target_health)
-                or automatic_exclusion_reason(target_health) is not None
+                target_health is not None
+                and target_health.profile_id == decision.target.profile_id
+                and SwitchPolicy._is_available(target_health)
+                and target_health.ordinary_usage_allowed is True
+                and automatic_exclusion_reason(target_health) is None
             ):
-                log.info(
-                    "Automatic handoff deferred: target account '%s' is no longer available.",
-                    decision.target.alias,
-                )
+                break
+            candidates = [c for c in candidates if c.profile_id != decision.target.profile_id]
+            decision = self.policy.decide(current, candidates)
+            if not decision.should_switch or decision.target is None:
                 bus.publish(
                     "switch.deferred",
-                    detail="The selected target account is no longer available.",
+                    detail="No target account passed the fresh availability check.",
                 )
                 return
+            key = (current.profile_id if current else None, decision.target.profile_id)
+            if self._failed_switch == key and time.monotonic() < self._retry_at:
+                return
+        if decision.target is None:
+            return
         log.info("Policy failover: %s", decision.reason)
         try:
             if current is not None and current.reauth_required:

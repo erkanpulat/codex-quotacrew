@@ -26,6 +26,7 @@ from codex_account_manager.core.errors import (
     DesktopContinuationRequired,
     SignedOutError,
     SignInRequiredError,
+    WorkspaceRoutingUnauthorizedError,
 )
 from codex_account_manager.core.logging import get_logger
 from codex_account_manager.core.protection import CredentialProtectionError
@@ -382,9 +383,19 @@ class CodexAppServer:
                 raise SignInRequiredError(
                     "Codex rejected this sign-in. Sign in again in Accounts."
                 ) from exc
+            if not self.refresh_on_unauthorized and re.search(r"\b401\b", str(exc)):
+                if _is_workspace_routing_unauthorized(exc):
+                    raise WorkspaceRoutingUnauthorizedError(
+                        "Codex workspace routing rejected discovery (401)."
+                    ) from exc
+                raise SignInRequiredError(
+                    "Codex rejected the active session (401). Switch accounts or sign in again."
+                ) from exc
             if not self.refresh_on_unauthorized or not re.search(r"\b401\b", str(exc)):
                 raise
             if refreshed:
+                if _is_workspace_routing_unauthorized(exc):
+                    raise WorkspaceRoutingUnauthorizedError(str(exc)) from exc
                 raise SignInRequiredError(
                     "Codex rejected this sign-in. Sign in again in Accounts."
                 ) from exc
@@ -395,6 +406,10 @@ class CodexAppServer:
                     "account/read", {"refreshToken": True}
                 )
             except AppServerError as retry_error:
+                if _is_workspace_routing_unauthorized(retry_error):
+                    raise WorkspaceRoutingUnauthorizedError(
+                        "Codex workspace routing rejected discovery (401)."
+                    ) from retry_error
                 if _requires_sign_in(retry_error) or re.search(r"\b401\b", str(retry_error)):
                     raise SignInRequiredError(
                         "Codex rejected this sign-in. Sign in again in Accounts."
@@ -413,9 +428,19 @@ class CodexAppServer:
                 raise SignInRequiredError(
                     "Codex rejected this sign-in. Sign in again in Accounts."
                 ) from exc
+            if not self.refresh_on_unauthorized and re.search(r"\b401\b", str(exc)):
+                if _is_workspace_routing_unauthorized(exc):
+                    raise WorkspaceRoutingUnauthorizedError(
+                        "Codex workspace routing rejected discovery (401)."
+                    ) from exc
+                raise SignInRequiredError(
+                    "Codex rejected the active session (401). Switch accounts or sign in again."
+                ) from exc
             if not self.refresh_on_unauthorized or not re.search(r"\b401\b", str(exc)):
                 raise
             if refreshed:
+                if _is_workspace_routing_unauthorized(exc):
+                    raise WorkspaceRoutingUnauthorizedError(str(exc)) from exc
                 raise SignInRequiredError(
                     "Codex rejected this sign-in. Sign in again in Accounts."
                 ) from exc
@@ -430,6 +455,10 @@ class CodexAppServer:
                     )
                 rate_result = await self._request("account/rateLimits/read")
             except AppServerError as retry_error:
+                if _is_workspace_routing_unauthorized(retry_error):
+                    raise WorkspaceRoutingUnauthorizedError(
+                        "Codex workspace routing rejected discovery (401)."
+                    ) from retry_error
                 if _requires_sign_in(retry_error) or re.search(r"\b401\b", str(retry_error)):
                     raise SignInRequiredError(
                         "Codex rejected this sign-in. Sign in again in Accounts."
@@ -688,6 +717,47 @@ class CodexAppServer:
             raise AppServerError("Could not verify the live conversation state.")
         return {**turn, "status": state}
 
+    async def verified_stored_turn(self, thread_id: str) -> dict | None:
+        """Corroborate the latest persisted turn with bounded lifecycle metadata."""
+        turn = await self.latest_turn(thread_id)
+        if not turn:
+            return None
+        result = await self._request_with_discovery_retry(
+            "thread/read", {"threadId": thread_id, "includeTurns": False}
+        )
+        thread = result.get("thread") or {}
+        if thread.get("id") != thread_id or not isinstance(thread.get("path"), str):
+            raise AppServerError("Could not verify the live conversation state.")
+        from codex_account_manager.codex.turn_activity import read_turn_activity
+
+        state = await asyncio.to_thread(
+            read_turn_activity, thread["path"], Path(self.codex_home), turn["id"]
+        )
+        if state == "unknown":
+            raise AppServerError("Conversation lifecycle metadata is unavailable.")
+        if state == "completed" and turn.get("status") == "failed":
+            return turn
+        return {**turn, "status": state}
+
+    async def require_bounded_desktop_history(self, thread_id: str) -> None:
+        from codex_account_manager.core.errors import ConversationHistoryTooLargeError
+        from codex_account_manager.core.files import resolved_path
+
+        result = await self._request_with_discovery_retry(
+            "thread/read", {"threadId": thread_id, "includeTurns": False}
+        )
+        thread = result.get("thread") or {}
+        if thread.get("id") != thread_id or not isinstance(thread.get("path"), str):
+            raise AppServerError("Conversation history size could not be verified.")
+        path = resolved_path(thread["path"])
+        if not path.is_relative_to(resolved_path(Path(self.codex_home) / "sessions")):
+            raise AppServerError("Conversation history is outside the local sessions directory.")
+        size = (await asyncio.to_thread(path.stat)).st_size
+        if size > 256 * 1024 * 1024:
+            raise ConversationHistoryTooLargeError(
+                "Automatic continuation is disabled for histories larger than 256 MiB."
+            )
+
     async def resume_for_continuation(self, thread_id: str) -> None:
         await self.require_headless_compatible(thread_id)
         result = await self._request("thread/resume", {"threadId": thread_id, "excludeTurns": True})
@@ -807,6 +877,11 @@ def _requires_sign_in(error: Exception) -> bool:
             "invalid_grant",
         )
     )
+
+
+def _is_workspace_routing_unauthorized(error: Exception) -> bool:
+    text = str(error).casefold()
+    return "workspace routing" in text and "401" in text
 
 
 def _display_email(value: object) -> str | None:

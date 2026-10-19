@@ -285,6 +285,45 @@ async def test_same_home_reads_cannot_rotate_tokens_concurrently(migrated_db):
     assert server.closed
 
 
+async def test_repeated_cancellation_keeps_read_lease_until_cleanup_finishes(migrated_db):
+    from codex_account_manager.core.errors import OperationBusyError
+
+    started = asyncio.Event()
+    closing = asyncio.Event()
+    release = asyncio.Event()
+
+    class ClosingServer(FakeAppServer):
+        async def read_account(self):
+            started.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            closing.set()
+            await release.wait()
+            await super().aclose()
+
+    server = ClosingServer()
+    service = AccountService(app_server_factory=lambda _: server)
+    task = asyncio.create_task(service.read_snapshot(migrated_db.shared_codex_home))
+    await started.wait()
+    task.cancel()
+    await closing.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    try:
+        assert not task.done()
+        from codex_account_manager.accounts.service import account_read_lock
+
+        with pytest.raises(OperationBusyError):
+            with account_read_lock(migrated_db.shared_codex_home):
+                pass
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert server.closed
+
+
 async def test_concurrent_health_refreshes_share_one_query_and_survive_cancel(migrated_db):
     service = AccountService()
     started = asyncio.Event()

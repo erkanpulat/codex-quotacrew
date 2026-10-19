@@ -10,6 +10,7 @@ from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.auth.transaction import AuthTransaction
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.continuity.tracking import WorkTracker
+from codex_account_manager.core.errors import AppServerError
 from codex_account_manager.domain.models import ThreadInfo
 from codex_account_manager.goals.service import GoalService
 from tests.fakes import FakeAppServer, FakeDesktop
@@ -204,6 +205,47 @@ async def test_unprepared_sibling_does_not_block_verified_limit_handoff(migrated
         good_ticket.desktop,
         good_ticket.owner_id,
     )
+
+
+@pytest.mark.parametrize("manual", [False, True])
+async def test_all_unreadable_continuations_do_not_veto_account_activation(migrated_db, manual):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.auth.transaction import SwitchResult
+    from codex_account_manager.core.errors import AppServerError
+    from codex_account_manager.domain.states import HandoffReason, TransactionStage
+
+    accounts = AccountService(app_server_factory=_factory("acc-2"))
+    await _seed_two_profiles(migrated_db, accounts)
+    service = ContinuityService(accounts=accounts)
+    service.observe_work = AsyncMock(return_value="acc-1")
+    service._work_verified = True
+    stopped = [("unreadable", "turn", "goal")]
+    service.tracker.limited = AsyncMock(return_value=stopped)
+    service.tracker.unfinished = AsyncMock(return_value=stopped)
+    service.automation.prepare = AsyncMock(side_effect=AppServerError("history unreadable"))
+    service.handoff = AsyncMock(
+        return_value=SwitchResult(True, TransactionStage.COMMIT, account_id="acc-2")
+    )
+    result = await service.continue_on_limit(
+        "hesap2",
+        reason=HandoffReason.MANUAL if manual else HandoffReason.USAGE_LIMITED,
+    )
+    assert result.success
+    service.handoff.assert_awaited_once()
+    assert not service.automation.tasks
+
+
+async def test_changed_account_cannot_pass_unknown_sibling_guard(migrated_db):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.core.errors import HandoffDeferredError
+
+    service = ContinuityService()
+    service.observe_work = AsyncMock(return_value="different-account")
+    service.tracker.limited = AsyncMock(return_value=[("job", "turn", "goal")])
+    with pytest.raises(HandoffDeferredError, match="active account changed"):
+        await service._require_restart_safe("original-account")
 
 
 @pytest.mark.parametrize("change", ["preparation", "target_verification", "unavailable", "paused"])
@@ -558,8 +600,9 @@ async def test_history_write_failure_after_commit_does_not_report_switch_failure
 
 
 @pytest.mark.parametrize("source_account", ["acc-1", "previous-account"])
+@pytest.mark.parametrize("unreachable_first", [False, True])
 async def test_manual_switch_continues_only_verified_quota_interruptions(
-    migrated_db, monkeypatch, source_account
+    migrated_db, monkeypatch, source_account, unreachable_first
 ):
     import asyncio
     from dataclasses import replace
@@ -585,7 +628,13 @@ async def test_manual_switch_continues_only_verified_quota_interruptions(
     monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: fake)
     service = ContinuityService(accounts=accounts)
     service.automation.factory = lambda: fake
-    service.automation.native.latest_turn = fake.latest_turn
+
+    async def latest(thread_id):
+        if unreachable_first and fake.account_id == "acc-2" and thread_id == "one":
+            raise AppServerError("Conversation unavailable")
+        return await fake.latest_turn(thread_id)
+
+    service.automation.native.latest_turn = latest
     for tid in ids:
         await _observed_running(tid, source_account)
     sent = []
@@ -608,7 +657,8 @@ async def test_manual_switch_continues_only_verified_quota_interruptions(
     result = await service.continue_on_limit("hesap2", transaction=tx, reason=HandoffReason.MANUAL)
     assert result.success
     await asyncio.gather(*tuple(service.automation.tasks))
-    assert sorted(sent) == [("one", "acc-2"), ("three", "acc-2"), ("two", "acc-2")]
+    expected = [tid for tid in ids if not (unreachable_first and tid == "one")]
+    assert sorted(sent) == sorted((tid, "acc-2") for tid in expected)
     assert desktop.stopped == desktop.launched == 1
     assert not fake.resume_calls
 
@@ -620,6 +670,7 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
 
     import codex_account_manager.continuity.service as cs
     from codex_account_manager.core.errors import DesktopContinuationRequired
+    from codex_account_manager.platform import windows
 
     accounts = AccountService(app_server_factory=_factory("acc-2"))
     await _seed_two_profiles(migrated_db, accounts)
@@ -647,14 +698,14 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
     async def latest(_tid):
         return dict(turn)
 
-    async def send(tid, source_id):
+    def open_goal(tid):
         nonlocal turn
-        sends.append((tid, source_id, fake.account_id))
+        sends.append((tid, turn["id"], fake.account_id))
         turn = {"id": f"next-{len(sends)}", "status": "inProgress"}
-        return {"threadId": tid}
 
     service.automation.native.latest_turn = latest
-    service.automation.native.send = send
+    service.automation.native.send = AsyncMock(side_effect=AssertionError("No message for goals"))
+    monkeypatch.setattr(windows, "open_conversation", open_goal)
     await service.observe_work()
     for alias, target in [("hesap2", "acc-2"), ("ana", "acc-1")]:
         source_id = turn["id"]
@@ -769,7 +820,6 @@ async def test_two_desktop_and_one_ide_limit_continue_after_committed_switch(
     fake.is_desktop_thread = is_desktop
     service.automation.native.latest_turn = native_latest
     service.automation.native.send = native_send
-    service.automation.wait_desktop_channel = lambda _thread_id: asyncio.sleep(0)
     await service.observe_work()
     assert len(await service.tracker.visible()) == 3
     for tid in ids:

@@ -33,6 +33,7 @@ from codex_account_manager.core.errors import (
     AppServerError,
     ConnectionNotReadyError,
     LocalResponseTooLargeError,
+    NativeOperationRejectedError,
 )
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ def decode_result(response: dict, request_id: str) -> dict:
     ):
         raise ConnectionNotReadyError("Codex Desktop has not finished preparing its app channel.")
     if error or not isinstance(result, dict) or result.get("success") is not True:
-        raise AppServerError("Desktop rejected the native operation.")
+        raise NativeOperationRejectedError("Desktop rejected the native operation.")
     items = result.get("contentItems")
     if not isinstance(items, list):
         raise AppServerError("Desktop returned no native result.")
@@ -85,6 +86,10 @@ def decode_result(response: dict, request_id: str) -> dict:
 
 
 def read_snapshot(data: dict, thread_id: str) -> dict:
+    if data.get("schemaVersion", 1) != 1:
+        raise AppServerError(
+            "Desktop conversation schema is not supported by this version of QuotaCrew."
+        )
     thread = data.get("thread")
     turns = data.get("turns")
     if (
@@ -252,7 +257,7 @@ class NativeDesktop:
                         return await self.latest_turn(thread_id)
                     except LocalResponseTooLargeError:
                         raise
-                    except (AppServerError, OSError):
+                    except (ConnectionNotReadyError, NativeOperationRejectedError, OSError):
                         await asyncio.sleep(0.25)
         except TimeoutError as exc:
             raise ConnectionNotReadyError(
@@ -277,8 +282,21 @@ class NativeDesktop:
 
 
 async def verified_desktop_turn(
-    native: NativeDesktop, adapter: CodexAppServer, thread_id: str, *, wait: bool = False
+    native: NativeDesktop,
+    adapter: CodexAppServer,
+    thread_id: str,
+    *,
+    wait: bool = False,
+    prefer_stored: bool = False,
 ) -> dict:
+    if prefer_stored:
+        try:
+            stored = await adapter.verified_stored_turn(thread_id)
+            if stored:
+                return stored
+        except (AppServerError, OSError):
+            pass
+        await adapter.require_bounded_desktop_history(thread_id)
     turn = await native.wait_latest_turn(thread_id) if wait else await native.latest_turn(thread_id)
     error = turn.get("error")
     if normalize_turn_status(turn.get("status")) != "failed" or (

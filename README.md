@@ -38,7 +38,7 @@ The plan badge can also show the subscription-period date recorded at sign-in wh
 
 ## Continuation flow
 
-With monitoring and the relevant continuation option enabled, QuotaCrew detects a quota-interrupted task and checks the destination account. After switching, it sends a continuation request to **the same conversation** and tracks the new turn in Jobs.
+With monitoring and the relevant continuation option enabled, QuotaCrew detects a quota-interrupted task and checks the destination account. After switching, it opens eligible Desktop goal conversations once, without an extra message. Other supported conversations receive a continuation request. Jobs tracks whether a new turn actually starts.
 
 ![QuotaCrew continuation: check the limit, switch accounts, send a request in the same conversation and track the result](docs/images/continuation-flow-en.svg)
 
@@ -93,7 +93,7 @@ QuotaCrew does not install a VS Code extension. **Open project in editor** opens
 
 **Python included · No Node.js required · Existing Codex history preserved**
 
-1. **Download and install.** Get `QuotaCrew-Setup-0.2.7.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, download `QuotaCrew-portable-0.2.7.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
+1. **Download and install.** Get `QuotaCrew-Setup-0.3.0.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, download `QuotaCrew-portable-0.3.0.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
 2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
 3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
 

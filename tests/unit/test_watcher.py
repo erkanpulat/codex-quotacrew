@@ -55,6 +55,34 @@ class _StubAccounts:
         return self._health
 
 
+async def test_failed_candidate_recheck_does_not_block_another_available_account():
+    from dataclasses import replace
+
+    health = [
+        _health("source", active=True, allowed=False, quota=QuotaState.LIMITED_NO_RESET),
+        _health("first"),
+        _health("second"),
+    ]
+
+    class Accounts(_StubAccounts):
+        async def health(self, alias):
+            candidate = next(item for item in health if item.alias == alias)
+            return (
+                replace(candidate, stale=True, error="routing unavailable")
+                if alias == "first"
+                else candidate
+            )
+
+    continuity = _FakeContinuity()
+    watcher = Watcher(
+        accounts=Accounts(health),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
+    )
+    await watcher.poll_once()
+    assert continuity.continued == ["second"]
+
+
 async def test_health_finishes_before_pending_worker_launches(migrated_db):
     from unittest.mock import AsyncMock
 
@@ -67,7 +95,7 @@ async def test_health_finishes_before_pending_worker_launches(migrated_db):
     class Accounts:
         async def all_health(self):
             order.append("health")
-            return []
+            return [_health("ready", active=True)]
 
     continuity.automation.recover_pending = AsyncMock(side_effect=recover)
     watcher = Watcher(accounts=Accounts(), continuity=continuity)

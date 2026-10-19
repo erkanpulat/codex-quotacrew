@@ -55,6 +55,12 @@ _MAX_CONCURRENT_READS = 4
 ACCOUNT_READ_TIMEOUT = 45.0
 
 
+def account_read_lock(codex_home: str | Path) -> OperationLock:
+    home_key = str(Path(codex_home).resolve()).casefold()
+    digest = sha256(home_key.encode()).hexdigest()[:24]
+    return OperationLock(paths.data_dir / f"account-read-{digest}.lock")
+
+
 def _default_factory(codex_home: str) -> AppServerAdapter:
     return CodexAppServer(
         codex_home,
@@ -195,9 +201,7 @@ class AccountService:
     async def read_snapshot(
         self, codex_home: str | Path, *, allow_refresh: bool = True, force_refresh: bool = False
     ) -> AccountSnapshot:
-        home_key = str(Path(codex_home).resolve()).casefold()
-        digest = sha256(home_key.encode()).hexdigest()[:24]
-        with OperationLock(paths.data_dir / f"account-read-{digest}.lock"):
+        with account_read_lock(codex_home):
             adapter = self._factory(str(codex_home))
             if not allow_refresh and isinstance(adapter, CodexAppServer):
                 adapter.refresh_on_unauthorized = False
@@ -211,7 +215,7 @@ class AccountService:
                 except TimeoutError as exc:
                     raise AppServerError("Account check timed out. Try refreshing again.") from exc
             finally:
-                await asyncio.shield(_safe_aclose(adapter))
+                await finish_cleanup(_safe_aclose(adapter))
 
     async def health(self, alias: str) -> ProfileHealth:
         profile = await self._require(alias)
@@ -239,6 +243,7 @@ class AccountService:
             # login or an automatic handoff for every account-read timeout.
             allow_refresh = True
             rejected_active = None
+            active_error = None
             try:
                 with OperationLock(paths.data_dir / "account-operation.lock"):
                     active = await self.read_snapshot(paths.shared_codex_home)
@@ -248,17 +253,26 @@ class AccountService:
                 allow_refresh = not self.credentials.active_auth_path.exists()
                 active = None
                 rejected_active = exc
-            except Exception:
+            except Exception as exc:
                 allow_refresh = not self.credentials.active_auth_path.exists()
                 active = None
+                active_error = exc
             active_id = active.account_id if active else None
-            if rejected_active is not None:
+            if rejected_active is not None or active_error is not None:
                 active_id = self.credentials.active_account_hint()
             semaphore = asyncio.Semaphore(_MAX_CONCURRENT_READS)
             rejected = await SettingsRepository().all()
 
             async def checked(profile: Profile) -> ProfileHealth:
                 try:
+                    if (
+                        active_error is not None
+                        and active_id
+                        and profile.bound_account_id == active_id
+                    ):
+                        return self._failed_health(
+                            profile, active_error, active_account_id=active_id
+                        )
                     if (
                         rejected_active is not None
                         and active_id

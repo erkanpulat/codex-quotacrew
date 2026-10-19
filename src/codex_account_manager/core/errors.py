@@ -29,12 +29,20 @@ class SignInRequiredError(AppServerError):
     """Codex explicitly reported a missing or permanently rejected sign-in."""
 
 
+class WorkspaceRoutingUnauthorizedError(AppServerError):
+    """The local workspace router rejected discovery without proving sign-in expiry."""
+
+
 class SignedOutError(SignInRequiredError):
     """Codex successfully read its authentication state and reported no account."""
 
 
 class DesktopContinuationRequired(AppServerError):
     """The conversation must retain its Desktop-owned tools and runtime."""
+
+
+class NativeOperationRejectedError(AppServerError):
+    """Desktop rejected an operation before returning a conversation snapshot."""
 
 
 class ConnectionNotReadyError(AppServerError):
@@ -47,6 +55,10 @@ class OwnerNotFoundError(AppServerError):
 
 class LocalResponseTooLargeError(AppServerError):
     """A local response exceeded the bounded frame or aggregate read size."""
+
+
+class ConversationHistoryTooLargeError(AppServerError):
+    """Automatic Desktop loading is unsafe for this conversation's history size."""
 
 
 class DesktopLaunchError(AccountManagerError):

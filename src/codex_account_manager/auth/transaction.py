@@ -7,6 +7,7 @@ import base64
 import json
 import os
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from codex_account_manager.adapters.interfaces import DesktopLauncher
 from codex_account_manager.core import protection
 from codex_account_manager.core.errors import (
     AccountMismatchError,
+    OperationBusyError,
     SignInRequiredError,
     TransactionError,
 )
@@ -231,7 +233,11 @@ class AuthTransaction:
             await asyncio.to_thread(self.desktop.require_available)
         source_profile: Profile | None = None
         if self._verify_account is None:
-            from codex_account_manager.accounts.service import AccountService
+            from codex_account_manager.accounts.service import (
+                ACCOUNT_READ_TIMEOUT,
+                AccountService,
+                account_read_lock,
+            )
 
             service = AccountService(credential_store=self.credentials)
             active_id = await service._active_account_id_safe()
@@ -239,9 +245,12 @@ class AuthTransaction:
             for profile in await service.list_profiles():
                 if active_id and profile.bound_account_id == active_id:
                     source_profile = profile
-                    self.credentials.sync_active_to_profile(
-                        profile.codex_home, expected_account_id=profile.bound_account_id
-                    )
+                    async with account_read_lock(profile.codex_home).wait(
+                        timeout=ACCOUNT_READ_TIMEOUT
+                    ):
+                        self.credentials.sync_active_to_profile(
+                            profile.codex_home, expected_account_id=profile.bound_account_id
+                        )
                     break
             try:
                 account_id = await self._verify(
@@ -256,6 +265,31 @@ class AuthTransaction:
                 raise
             if account_id != target.bound_account_id:
                 raise AccountMismatchError("Profile credentials no longer match its bound account.")
+        from codex_account_manager.accounts.service import ACCOUNT_READ_TIMEOUT, account_read_lock
+
+        homes = {target.codex_home}
+        if source_profile:
+            homes.add(source_profile.codex_home)
+        async with AsyncExitStack() as leases:
+            for home in sorted(homes):
+                await leases.enter_async_context(
+                    account_read_lock(home).wait(timeout=ACCOUNT_READ_TIMEOUT)
+                )
+            return await self._activate(
+                target,
+                source_profile,
+                after_switch=after_switch,
+                before_desktop_stop=before_desktop_stop,
+            )
+
+    async def _activate(
+        self,
+        target: Profile,
+        source_profile: Profile | None,
+        *,
+        after_switch: Callable[[], Awaitable[None]] | None,
+        before_desktop_stop: Callable[[], Awaitable[None]] | None,
+    ) -> SwitchResult:
         new_auth = self.credentials.read_profile(target.codex_home)
         if not new_auth:
             raise TransactionError("Profile credentials are empty.", stage="prepare")
@@ -345,10 +379,19 @@ class AuthTransaction:
     async def _verify(self, codex_home: Path, *, force_refresh: bool = False) -> str | None:
         if self._verify_account is not None:
             return await self._verify_account(str(codex_home))
-        from codex_account_manager.accounts.service import AccountService
+        from codex_account_manager.accounts.service import ACCOUNT_READ_TIMEOUT, AccountService
 
-        snapshot = await AccountService().read_snapshot(codex_home, force_refresh=force_refresh)
-        return snapshot.account_id
+        deadline = asyncio.get_running_loop().time() + ACCOUNT_READ_TIMEOUT
+        while True:
+            try:
+                snapshot = await AccountService().read_snapshot(
+                    codex_home, force_refresh=force_refresh
+                )
+                return snapshot.account_id
+            except OperationBusyError:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.1)
 
 
 def _default_desktop() -> DesktopLauncher:

@@ -236,6 +236,39 @@ async def test_repeated_cursor_fails_instead_of_looping(monkeypatch):
         await server.list_threads()
 
 
+@pytest.mark.parametrize("event_id,expected", [("turn", "failed"), ("different", None)])
+async def test_stored_desktop_failure_requires_matching_lifecycle(
+    tmp_path, monkeypatch, event_id, expected
+):
+    import json
+
+    history = tmp_path / "sessions" / "rollout.jsonl"
+    history.parent.mkdir()
+    history.write_text(
+        json.dumps(
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": event_id,
+                },
+            }
+        )
+        + "\n"
+    )
+    server = CodexAppServer(tmp_path)
+    turn = {"id": "turn", "status": "failed", "error": {"codexErrorInfo": "usageLimitExceeded"}}
+    monkeypatch.setattr(server, "latest_turn", AsyncMock(return_value=turn))
+    request = AsyncMock(return_value={"thread": {"id": "thread", "path": str(history)}})
+    monkeypatch.setattr(server, "_request_with_discovery_retry", request)
+    if expected:
+        assert await server.verified_stored_turn("thread") == turn
+    else:
+        with pytest.raises(AppServerError, match="lifecycle"):
+            await server.verified_stored_turn("thread")
+    assert request.call_args.args[1]["includeTurns"] is False
+
+
 async def test_thread_metadata_and_all_sources_request(monkeypatch):
     server = CodexAppServer("test")
     request = AsyncMock(
@@ -639,14 +672,30 @@ async def test_workspace_discovery_401_refreshes_only_once(monkeypatch, quota_re
 
 
 async def test_shared_workspace_discovery_does_not_rotate_token(monkeypatch):
+    from codex_account_manager.core.errors import WorkspaceRoutingUnauthorizedError
+
     server = CodexAppServer("shared")
     request = AsyncMock(
         side_effect=AppServerError("workspace routing discovery unauthorized (401)")
     )
     monkeypatch.setattr(server, "_request", request)
-    with pytest.raises(AppServerError):
+    with pytest.raises(WorkspaceRoutingUnauthorizedError):
         await server.read_account()
     assert request.await_count == 1
+
+
+@pytest.mark.parametrize("force_refresh", [False, True])
+async def test_profile_routing_401_is_not_permanent_auth_rejection(monkeypatch, force_refresh):
+    from codex_account_manager.core.errors import WorkspaceRoutingUnauthorizedError
+
+    server = CodexAppServer("profile", refresh_on_unauthorized=True)
+    request = AsyncMock(
+        side_effect=AppServerError("workspace routing discovery unauthorized (401)")
+    )
+    monkeypatch.setattr(server, "_request", request)
+    with pytest.raises(WorkspaceRoutingUnauthorizedError):
+        await server.read_account(force_refresh=force_refresh)
+    assert request.await_count == (1 if force_refresh else 2)
 
 
 async def test_transient_workspace_discovery_failure_is_retried(monkeypatch):

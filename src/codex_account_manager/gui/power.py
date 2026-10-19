@@ -460,7 +460,7 @@ class PowerControls(QFrame):
         now = time.monotonic()
         remaining = self.plan.remaining(now)
         text = (
-            tr(self.plan.reason)
+            tr(self.plan.reason, **self.plan.reason_values)
             if remaining is None
             else tr("Shutting down in {seconds}s. Save your work or cancel.", seconds=remaining)
         )

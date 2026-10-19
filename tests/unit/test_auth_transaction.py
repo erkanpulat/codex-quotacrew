@@ -30,6 +30,79 @@ async def test_successful_switch_commits(tmp_paths):
     assert store.read_active() == b'{"account":"new"}'
 
 
+async def test_verification_waits_for_transient_read_contention(tmp_paths, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.accounts.service import AccountService
+    from codex_account_manager.core.errors import OperationBusyError
+
+    read = AsyncMock(
+        side_effect=[OperationBusyError("reader busy"), SimpleNamespace(account_id="target")]
+    )
+    monkeypatch.setattr(AccountService, "read_snapshot", read)
+    result = await AuthTransaction(desktop=FakeDesktop())._verify(tmp_paths.shared_codex_home)
+    assert result == "target"
+    assert read.await_count == 2
+
+
+async def test_background_profile_read_cannot_abort_activation_after_desktop_stops(tmp_paths):
+    import asyncio
+
+    from codex_account_manager.accounts.service import AccountService
+    from codex_account_manager.adapters.credential_store import ProfileAuthSession
+    from codex_account_manager.core.errors import OperationBusyError
+    from tests.fakes import FakeAppServer
+
+    store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
+    store.write_active_atomic(b'{"account":"old"}')
+    profile = _profile(tmp_paths)
+    release = asyncio.Event()
+    entered = asyncio.Event()
+    readers = []
+
+    class ReadingServer(FakeAppServer):
+        async def start(self):
+            self.session = ProfileAuthSession(profile.codex_home)
+            self.session.__enter__()
+            return await super().start()
+
+        async def read_account(self):
+            entered.set()
+            await release.wait()
+            return await super().read_account()
+
+        async def aclose(self):
+            if getattr(self, "session", None):
+                self.session.__exit__(None, None, None)
+            await super().aclose()
+
+    service = AccountService(app_server_factory=lambda _: ReadingServer())
+
+    async def background_read():
+        try:
+            await service.read_snapshot(profile.codex_home)
+        except OperationBusyError:
+            entered.set()
+
+    async def verify(_home):
+        readers.append(asyncio.create_task(background_read()))
+        await asyncio.wait_for(entered.wait(), 2)
+        return "acc-1"
+
+    desktop = FakeDesktop()
+    try:
+        result = await AuthTransaction(
+            credential_store=store, desktop=desktop, verify_account=verify
+        ).switch(profile)
+        assert result.success
+        assert desktop.stopped == desktop.launched == 1
+        assert store.read_active() == b'{"account":"new"}'
+    finally:
+        release.set()
+        await asyncio.gather(*readers)
+
+
 async def test_running_desktop_is_relaunched_when_registration_check_is_unavailable(
     tmp_paths, monkeypatch
 ):

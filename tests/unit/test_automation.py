@@ -211,6 +211,34 @@ async def test_cancelled_desktop_lane_keeps_unstarted_tickets_for_recovery(migra
     assert rows == [("first",), ("second",)]
 
 
+async def test_failed_desktop_job_never_restarts_app_and_next_job_still_runs(
+    migrated_db, monkeypatch
+):
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.adapters.native_desktop import NativeDesktop
+    from codex_account_manager.core.errors import ConnectionNotReadyError
+
+    supervisor = ContinuationSupervisor(factory=lambda: ExecutionServer())
+    first = replace(await prepared(supervisor), desktop=True, thread_id="first")
+    second = replace(first, thread_id="second")
+    restart = AsyncMock(side_effect=AssertionError("Continuation must never restart Desktop"))
+    monkeypatch.setattr(NativeDesktop, "restart", restart, raising=False)
+    attempted = []
+
+    async def execute(ticket):
+        attempted.append(ticket.thread_id)
+        if ticket.thread_id == "first":
+            raise ConnectionNotReadyError("unavailable")
+
+    supervisor.run = execute
+    supervisor.launch_batch([first, second])
+    await asyncio.gather(*tuple(supervisor.tasks))
+    assert attempted == ["first", "second"]
+    restart.assert_not_awaited()
+
+
 async def test_limit_during_owned_continuation_remains_eligible_for_next_handoff(migrated_db):
     class LimitedAgain(ExecutionServer):
         async def run_continuation_turn(self, *args, **kwargs):

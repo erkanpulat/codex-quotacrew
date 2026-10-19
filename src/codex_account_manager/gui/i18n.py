@@ -73,6 +73,9 @@ EN = {
 }
 
 TR = {
+    "Codex workspace routing rejected discovery (401).": "Codex çalışma alanı bağlantısını reddetti (401). Bu bir kota sonucu değildir; bağlantı yeniden kontrol edilecek. Manuel hesap geçişi kullanılabilir.",
+    "Codex rejected the active session (401). Switch accounts or sign in again.": "Codex etkin oturumu reddetti (401). Başka hesaba geçin veya yeniden giriş yapın.",
+    "No target account passed the fresh availability check.": "Güncel kontrolde kullanılabilir bir hedef hesap doğrulanamadı. Hesap bilgileri yeniden kontrol edilecek.",
     "The operation could not be completed. See Activity or System check for details.": "İşlem tamamlanamadı. Ayrıntılar için Etkinlik veya Sistem Kontrolü bölümüne bakın.",
     "Uninstalling and removing local data": "Uygulamayı kaldırma ve yerel verileri silme",
     "Uninstalling QuotaCrew keeps saved accounts, settings and backups on this PC. A separately installed Codex CLI and its PATH entry also remain. See Help → Privacy policy for removal instructions.": "QuotaCrew'ü kaldırmak kayıtlı hesapları, ayarları ve yedekleri bu bilgisayarda bırakır. Ayrı kurulan Codex CLI ve PATH kaydı da kalır. Silme adımları için Yardım → Gizlilik politikası bölümüne bakın.",
@@ -480,7 +483,23 @@ TR = {
     "Enable shutdown for this session? Condition: {condition} Countdown: {minutes} minutes. Save work in other applications.": "Bu oturum için otomatik kapatma etkinleştirilsin mi? Koşul: {condition} Geri sayım: {minutes} dakika. Diğer uygulamalardaki çalışmalarınızı kaydedin.",
     "Shutting down in {seconds}s. Save your work or cancel.": "Bilgisayar {seconds} saniye sonra kapanacak. Çalışmanızı kaydedin veya iptal edin.",
     "Waiting for the selected condition.": "Seçilen koşulun gerçekleşmesi bekleniyor.",
-    "Waiting for a fresh check.": "Güncel bir doğrulama bekleniyor.",
+    "Waiting for a fresh check.": "Kontrol tamamlanamadı. Kapatma duraklatıldı; bağlantı yeniden kontrol edilecek.",
+    "Conversation discovery is incomplete. Shutdown will wait.": "Konuşma listesi tamamlanamadı. Çalışan işleri kaçırmamak için kapatma bekliyor.",
+    "Waiting for {count} running conversations to stop.": "{count} konuşma hâlâ çalışıyor. İşler durunca kapatma koşulu yeniden değerlendirilecek.",
+    "Could not read {count} conversations. Keep Codex open; checking again automatically.": "{count} konuşmanın durumu okunamadı. Codex'i açık bırakın; otomatik olarak yeniden kontrol edilecek.",
+    "The conversation stopped, but its goal is not complete. Waiting for the goal to finish.": "Konuşma durdu ancak hedefi tamamlanmadı. Kapatma için hedefin tamamlanması bekleniyor.",
+    "The selected work has not completed. Errors and user pauses do not count as completion.": "Seçili iş tamamlanmadı. Hata nedeniyle duran veya sizin duraklattığınız iş tamamlanmış sayılmaz.",
+    "{count} accounts still have capacity. Shutdown will wait.": "{count} hesapta kullanılabilir kota var. Kapatma, tüm 5 saatlik kotalar dolduğunda başlayacak.",
+    "Not all five-hour quotas are confirmed exhausted. Check Accounts for missing or expired sign-ins.": "Tüm 5 saatlik kotaların dolduğu doğrulanamadı. Hesaplarım bölümünde eksik bilgi veya yeniden giriş uyarısı olup olmadığını kontrol edin.",
+    "Automatic continuation stopped": "Otomatik devam durduruldu",
+    "Waiting for goal to resume": "Hedefin devam etmesi bekleniyor",
+    "Waiting for {count} queued continuations.": "Sıradaki {count} otomatik devam işlemi bekleniyor. Kapatma henüz başlamadı.",
+    "Opening conversation for its goal": "Hedefi devam ettirmek için sohbeti açma",
+    "Conversation opened; waiting for goal": "Sohbet açıldı; hedef bekleniyor",
+    "The conversation was opened once to resume its goal. No message was sent. A new turn has not been verified; other jobs and account switching continue. Check the goal in Codex.": "Hedefi devam ettirmek için sohbet bir kez açıldı. Mesaj gönderilmedi. Yeni bir tur başladığı henüz doğrulanmadı; diğer işler ve hesap geçişleri devam eder. Hedefi Codex'te kontrol edin.",
+    "Desktop conversation schema is not supported by this version of QuotaCrew.": "Codex'in sohbet bağlantı biçimi bu QuotaCrew sürümünde desteklenmiyor. Otomatik devam durduruldu; QuotaCrew güncellemelerini kontrol edin.",
+    "Conversation history is too large for automatic continuation": "Konuşma geçmişi otomatik devam için çok büyük",
+    "This conversation exceeds the automatic history limit. No message was sent. Other jobs and account switching continue. Open it manually in Codex or start a new conversation with a summary.": "Bu konuşmanın geçmişi otomatik devam sınırını aşıyor. Mesaj gönderilmedi; diğer işler ve hesap geçişi devam eder. Codex'te elle açabilir veya özetle yeni bir konuşmaya geçebilirsiniz.",
     "Too many conversations to verify safely.": "Güvenli doğrulama sınırından fazla konuşma var; kapatma bekliyor.",
     "Work is active or could not be verified.": "Çalışan bir iş var veya iş durumu doğrulanamadı.",
     "The selected work has not completed.": "Seçilen iş henüz tamamlanmadı.",
@@ -892,6 +911,17 @@ def state_label(value: str) -> str:
 
 
 def work_status(work: ObservedWork) -> tuple[str, str]:
+    if work.continuation_status == "goal_opened":
+        return tr("Waiting for goal to resume"), tr(
+            "The conversation was opened once to resume its goal. No message was sent. A new turn has not been verified; other jobs and account switching continue. Check the goal in Codex."
+        )
+    if work.continuation_status == "history_too_large":
+        return (
+            tr("Automatic continuation stopped"),
+            tr(
+                "This conversation exceeds the automatic history limit. No message was sent. Other jobs and account switching continue. Open it manually in Codex or start a new conversation with a summary."
+            ),
+        )
     if work.turn_status == "awaitingDesktop":
         if work.continuation_status == "submitted":
             label, detail = (
@@ -973,6 +1003,7 @@ def source_label(value: str | None) -> str:
 def continuation_detail(payload: dict) -> str:
     stages = {
         "authentication": "Codex authentication",
+        "goal_activation": "Opening conversation for its goal",
         "recovery": "Recovering prepared continuation",
         "desktop": "Codex Desktop continuation",
         "ide": "IDE connection and conversation owner",
@@ -990,11 +1021,14 @@ def continuation_detail(payload: dict) -> str:
         "preparation": "Preparing continuation before account switching",
         "observation": "Observing the submitted continuation",
         "desktop_restart": "Shared Desktop restart",
+        "history_size": "Conversation history is too large for automatic continuation",
     }
     states = {
         "waiting_connection": "Waiting for connection",
         "waiting_shared": "Waiting for a shared resource",
         "completed": "Completed",
+        "running": "Running",
+        "goal_opened": "Conversation opened; waiting for goal",
         "stopped": "Stopped",
         "needs_user": "Needs attention",
         "skipped": "Skipped",

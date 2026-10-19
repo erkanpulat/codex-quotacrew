@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-10-19
+
+- Separate account activation from individual continuation failures and reserve profile access through credential verification to prevent background-reader collisions.
+- Open eligible Desktop goal conversations once without an extra message; observe goals that resume themselves and retain at-most-once continuation records.
+- Remove Desktop restart recovery from the continuation queue. A failed conversation waits or requires attention without restarting successful work.
+- Prioritize active and changed conversations, bound background checks, and retry unavailable conversations independently. Avoid loading oversized histories automatically.
+- Clarify shutdown blockers, cache verified unchanged idle histories, and check pending continuations before shutdown after selected work.
+- Aggregate observation errors without recording conversation contents.
+- Wait for the Desktop message channel after account switching; keep unsent requests pending without replaying ambiguous deliveries.
+
 ## 0.2.7 — 2026-10-18
 
 - Isolate unavailable conversations so one job does not block eligible account switches or independent continuations.

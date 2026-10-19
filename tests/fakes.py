@@ -90,6 +90,14 @@ class FakeAppServer:
     async def observed_turn(self, thread_id: str) -> dict | None:
         return await self.latest_turn(thread_id)
 
+    async def verified_stored_turn(self, thread_id: str) -> dict | None:
+        from codex_account_manager.core.errors import AppServerError
+
+        raise AppServerError("No lifecycle fixture supplied.")
+
+    async def require_bounded_desktop_history(self, thread_id: str) -> None:
+        pass
+
     async def is_desktop_thread(self, thread_id: str) -> bool:
         return False
 

@@ -34,7 +34,7 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 ## Devam akışı
 
-İzleme ve ilgili devam seçeneği açıkken QuotaCrew, kota nedeniyle kesilen işi algılar ve kullanılabilir hesabı kontrol eder. Geçişin ardından **aynı konuşmaya** bir devam isteği gönderir; yeni turun durumunu takip ederek sonucu İşler sayfasında gösterir.
+İzleme ve ilgili devam seçeneği açıkken QuotaCrew, kota nedeniyle kesilen işi algılar ve kullanılabilir hesabı kontrol eder. Geçişin ardından uygun hedefli Desktop sohbetini ek mesaj göndermeden bir kez açar. Desteklenen diğer sohbetlere devam isteği gönderir. Yeni turun gerçekten başlayıp başlamadığını İşler sayfasında gösterir.
 
 ![Kota kesintisinden sonra limit kontrolü, hesap geçişi, aynı sohbete devam isteği ve sonuç takibi](docs/images/continuation-flow-tr.svg)
 
@@ -89,7 +89,7 @@ QuotaCrew bir VS Code eklentisi yüklemez. **Projeyi editörde aç** klasörü a
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve kurun.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.2.7.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.2.7.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve kurun.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.3.0.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.3.0.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 

@@ -28,6 +28,7 @@ from codex_account_manager.continuity.tracking import WorkTracker, goal_signatur
 from codex_account_manager.core.errors import (
     AppServerError,
     ConnectionNotReadyError,
+    ConversationHistoryTooLargeError,
     DesktopContinuationRequired,
     OwnerNotFoundError,
     TransactionError,
@@ -102,7 +103,6 @@ class ContinuationSupervisor:
         self.tracker = WorkTracker()
         self._account_readers = 0
         self._account_lock: OperationLock | None = None
-        self._queued_executions = 0
 
     @contextmanager
     def _account_session(self) -> Iterator[None]:
@@ -127,21 +127,6 @@ class ContinuationSupervisor:
 
     async def desktop_enabled(self) -> bool:
         return await SettingsRepository().get("desktop_continue", "true") == "true"
-
-    async def wait_desktop_channel(self, thread_id: str, timeout: float = 30.0) -> None:
-        """Wait until Desktop's native app-tools channel answers a read."""
-        await self.native.wait_latest_turn(thread_id, timeout=timeout)
-
-    @staticmethod
-    async def _restart_desktop_if_needed() -> None:
-        from codex_account_manager.adapters.desktop import WindowsDesktopLauncher
-
-        launcher = WindowsDesktopLauncher()
-        if launcher.is_running():
-            return
-        launcher.launch()
-        if not await launcher.wait_ready(30.0):
-            raise ConnectionNotReadyError("Codex Desktop did not reopen after the account switch.")
 
     async def uses_ide(self, adapter: CodexAppServer, thread_id: str) -> bool:
         return await self.ide_enabled() and not await adapter.is_desktop_thread(thread_id)
@@ -218,7 +203,7 @@ class ContinuationSupervisor:
                     return None
             else:
                 turn = (
-                    await verified_desktop_turn(self.native, adapter, thread_id)
+                    await verified_desktop_turn(self.native, adapter, thread_id, prefer_stored=True)
                     if desktop
                     else await adapter.latest_turn(thread_id)
                 )
@@ -228,13 +213,19 @@ class ContinuationSupervisor:
             if not turn or not has_verified_limit_turn(turn, goal):
                 await self.report(thread_id, "skipped", "verification")
                 return None
-            return ContinuationTicket(
+            ticket = ContinuationTicket(
                 thread_id,
                 turn["id"],
                 goal_signature=goal_signature(goal),
                 desktop=desktop,
                 owner_id=owner_id,
             )
+            if desktop and not owner_id:
+                if goal.present:
+                    await self._release_history_block(ticket)
+                elif await self._isolate_large_history(adapter, ticket):
+                    return None
+            return ticket
         finally:
             await adapter.aclose()
 
@@ -264,19 +255,10 @@ class ContinuationSupervisor:
                             continue
                         if ticket.desktop:
                             async with asyncio.timeout(NATIVE_CONTINUATION_SECONDS):
-                                self._queued_executions += 1
-                                try:
-                                    await self.run(ticket)
-                                finally:
-                                    self._queued_executions -= 1
+                                await self.run(ticket)
                         else:
                             await self.run(ticket)
                     except ConnectionNotReadyError:
-                        if ticket.desktop and not ticket.owner_id:
-                            try:
-                                await self._restart_desktop_if_needed()
-                            except Exception:
-                                log.warning("Codex Desktop could not be reopened for recovery.")
                         waiting.add((ticket.thread_id, ticket.turn_id))
                         await self.report(
                             ticket.thread_id,
@@ -403,6 +385,29 @@ class ContinuationSupervisor:
             )
             await db.commit()
             return message_id if cursor.rowcount == 1 else None
+
+    async def _isolate_large_history(self, adapter, ticket: ContinuationTicket) -> bool:
+        try:
+            await adapter.require_bounded_desktop_history(ticket.thread_id)
+        except ConversationHistoryTooLargeError:
+            async with connect() as db:
+                await db.execute(
+                    "INSERT OR IGNORE INTO continuation_attempts VALUES (?, ?, ?, 'history_too_large')",
+                    (ticket.thread_id, ticket.turn_id, str(uuid4())),
+                )
+                await db.commit()
+            await self.report(ticket.thread_id, "needs_user", "history_size")
+            return True
+        return False
+
+    async def _release_history_block(self, ticket: ContinuationTicket) -> None:
+        async with connect() as db:
+            await db.execute(
+                "DELETE FROM continuation_attempts WHERE thread_id=? AND source_turn_id=? "
+                "AND status='history_too_large'",
+                (ticket.thread_id, ticket.turn_id),
+            )
+            await db.commit()
 
     async def _record(self, ticket: ContinuationTicket, status: str) -> None:
         async with connect() as db:
@@ -556,6 +561,7 @@ class ContinuationSupervisor:
         claimed = False
         owner_snapshot: OwnerSnapshot | None = None
         verified_owner: str | None = None
+        goal_activation = False
         key = sha256(ticket.thread_id.encode()).hexdigest()
         task = asyncio.current_task()
         loop = asyncio.get_running_loop()
@@ -572,7 +578,13 @@ class ContinuationSupervisor:
                 return turn
             if not await self.desktop_enabled():
                 raise AppServerError("Desktop continuation is disabled.")
-            return await verified_desktop_turn(self.native, adapter, ticket.thread_id, wait=wait)
+            return await verified_desktop_turn(
+                self.native,
+                adapter,
+                ticket.thread_id,
+                wait=wait,
+                prefer_stored=goal_activation,
+            )
 
         def stop_requested(event) -> None:
             scope = event.payload.get("scope")
@@ -602,9 +614,31 @@ class ContinuationSupervisor:
             ):
                 raise AppServerError("The active account changed before Desktop continuation.")
             stage = "ide" if ticket.owner_id else "desktop"
+            goal = await adapter.get_goal(ticket.thread_id)
+            goal_activation = bool(not ticket.owner_id and goal and goal.present)
+            if (
+                not ticket.owner_id
+                and not goal_activation
+                and await self._isolate_large_history(adapter, ticket)
+            ):
+                return
+            if not ticket.owner_id and not goal_activation:
+                await self.report(ticket.thread_id, "waiting_connection", "desktop")
             latest = await latest_turn(wait=True)
             stage = "verification"
             goal = await adapter.get_goal(ticket.thread_id)
+            if (
+                latest.get("id") != ticket.turn_id
+                and normalize_turn_status(latest.get("status")) == "inProgress"
+                and goal is not None
+                and goal.present
+                and goal.status == "active"
+                and goal_signature(goal) == ticket.goal_signature
+            ):
+                await self.tracker.observe(ticket.account_id, ticket.thread_id, latest, goal)
+                await self.report(ticket.thread_id, "running", "observation")
+                bus.publish("work.observed")
+                return
             if (
                 latest.get("id") != ticket.turn_id
                 or not has_verified_limit_turn(latest, goal)
@@ -662,12 +696,21 @@ class ContinuationSupervisor:
                 final_goal = await adapter.get_goal(ticket.thread_id)
                 if final_goal is None or final_goal.status != "active":
                     raise AppServerError("Could not restore the Desktop goal before continuation.")
-                if ticket.owner_id:
-                    refreshed = await latest_turn()
-                    if refreshed.get("id") != ticket.turn_id or normalize_turn_status(
-                        refreshed.get("status")
-                    ) != normalize_turn_status(current.get("status")):
-                        raise AppServerError("The IDE conversation changed after goal recovery.")
+                refreshed = await latest_turn()
+                if (
+                    refreshed.get("id") != ticket.turn_id
+                    and normalize_turn_status(refreshed.get("status")) == "inProgress"
+                ):
+                    await self.tracker.observe(
+                        ticket.account_id, ticket.thread_id, refreshed, final_goal
+                    )
+                    await self.report(ticket.thread_id, "running", "observation")
+                    bus.publish("work.observed")
+                    return
+                if refreshed.get("id") != ticket.turn_id or normalize_turn_status(
+                    refreshed.get("status")
+                ) != normalize_turn_status(current.get("status")):
+                    raise AppServerError("The conversation changed after goal recovery.")
             stage = "owner_busy"
             if owner_snapshot and (
                 owner_snapshot.blocked
@@ -684,6 +727,8 @@ class ContinuationSupervisor:
             ):
                 raise AppServerError("The IDE goal or approval state changed.")
             stage = "journal"
+            if goal_activation:
+                await self._release_history_block(ticket)
             message_id = await self._claim(ticket)
             if message_id is None:
                 raise AppServerError("Desktop continuation was already attempted.")
@@ -691,14 +736,24 @@ class ContinuationSupervisor:
             stage = "execution"
             if ticket.owner_id and owner_snapshot:
                 await self.ide.send(ticket.thread_id, owner_snapshot, message_id)
+            elif final_goal.present:
+                from codex_account_manager.platform.windows import open_conversation
+
+                stage = "goal_activation"
+                await asyncio.to_thread(open_conversation, ticket.thread_id)
             else:
                 await self.native.send(ticket.thread_id, ticket.turn_id)
-            await self._record(ticket, "submitted")
+            goal_opened = final_goal.present and not ticket.owner_id
+            await self._record(ticket, "goal_opened" if goal_opened else "submitted")
             claimed = False
             await self.report(
                 ticket.thread_id,
-                "ide_submitted" if ticket.owner_id else "desktop_submitted",
-                "execution",
+                "goal_opened"
+                if goal_opened
+                else "ide_submitted"
+                if ticket.owner_id
+                else "desktop_submitted",
+                stage,
             )
             stage = "observation"
             # Bound post-send observation; preserve the submitted claim on timeout.
@@ -748,10 +803,6 @@ class ContinuationSupervisor:
         except Exception as exc:
             if claimed:
                 await self._record(ticket, "uncertain")
-            if self._queued_executions > 0 and stage == "observation":
-                raise ConnectionNotReadyError(
-                    "Desktop continuation was submitted but its result could not be observed."
-                ) from exc
             if (
                 not claimed
                 and not ticket.owner_id

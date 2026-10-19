@@ -6,6 +6,8 @@ QuotaCrew keeps saved account credentials separate while using the shared Codex 
 
 Automatic switching requires a verified limited account and a verified available destination. Free, unknown and stale account states are excluded; manual selection remains available.
 
+An explicitly rejected sign-in can also trigger recovery to a verified available account. A workspace-routing 401 is treated separately: it does not prove quota exhaustion or permanent sign-in expiry. Failed routing checks remain visible and are retried by monitoring; manual switching does not depend on a successful conversation scan. Isolated profile authentication refresh is bounded to one attempt per check.
+
 Before restarting Desktop, QuotaCrew validates the destination session. An invalidated session requires signing in again. Account operations are serialized, credential writes are atomic, and an interrupted switch retains a recovery snapshot. Failed activation restores the previous account when possible.
 
 A successful account switch does not by itself prove that a conversation resumed or that an IDE reloaded its cached account.
@@ -17,10 +19,12 @@ With monitoring and the relevant continuation option enabled:
 1. Observe running work and a subsequent verified quota interruption.
 2. Check the destination account and ensure other work or approvals do not block the handoff.
 3. Switch accounts and reconnect to the original conversation.
-4. Recheck its turn, goal and connection before sending one continuation request.
+4. Recheck its turn, goal and connection. For eligible Desktop goals, open the conversation once so Codex can resume its goal. For other supported work, send one continuation request.
 5. Record the observed result in Jobs.
 
-The request preserves existing instructions, permissions and budgets. It is model input and can consume quota. User-paused, blocked or completed goals are not automatically restarted; approval requests remain with the user.
+Goal opening sends no message. If a new turn is already running, QuotaCrew observes it without another action. A goal whose quota interruption is verified may be reactivated, preserving its budget. User-paused, blocked or completed goals are not automatically restarted; approval requests remain with the user. Other continuation requests are model input and can consume quota.
+
+After opening a goal, QuotaCrew waits briefly for a new turn. If none can be verified, Jobs explains that goal resumption is unconfirmed. It does not repeatedly open the conversation, send a fallback prompt or restart Desktop. A successful account switch remains committed even if an individual continuation fails.
 
 Unsent requests can wait for a connection for up to ten minutes. An uncertain submission is not resent automatically. Pausing or clearing tracking cancels waiting requests; account information continues refreshing. Historical failures found on the first observation are not automatically revived.
 
@@ -37,6 +41,14 @@ The extension's cached account cannot be independently verified by QuotaCrew. If
 ## Work tracking
 
 Jobs counts verified running work. Completed conversations are retired after a successful observation, including after account changes. Unknown status is not proof of running or finished work. Very short tasks may occur between checks.
+
+Checks prioritize tracked and active conversations, compare metadata and local file revisions, and inspect older conversations in bounded batches. Unavailable conversations have independent retry delays. Lightweight turn metadata is corroborated with a bounded local activity read; observation does not scan entire conversation files.
+
+Native Desktop reads may load conversation history. QuotaCrew stops those reads and automatic message delivery when a verified local history exceeds 256 MiB. Goal activation is separate: verified lightweight state permits opening the conversation once without sending a message, regardless of history size. If lightweight verification fails, oversized histories remain isolated. Opening can still cause Codex itself to load history; the threshold is not a guarantee about Codex's memory use. History is never deleted or modified.
+
+Private Desktop channels can change between Codex versions. Transport parsing is kept in the adapter; unsupported responses stop that action. Conversation failures do not initiate a Desktop restart. Account activation can still require one restart, and a failed activation may require rollback.
+
+Message delivery requires a successful read through Desktop's own channel; lightweight stored observations do not establish delivery readiness. After restart, rejected read operations are retried for up to 20 seconds. An unsent request remains pending for bounded recovery if that wait expires. A generic error after sending is not replayed because delivery may be ambiguous.
 
 Clear tracking removes QuotaCrew observations and pauses automation; it does not delete Codex conversations. The latest continuation details are available from each job's menu.
 
