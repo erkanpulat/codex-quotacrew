@@ -112,6 +112,43 @@ async def test_native_channel_serializes_overlapping_calls(monkeypatch):
     await asyncio.gather(first, second)
 
 
+@pytest.mark.parametrize("activity", ["active", "idle", "notLoaded"])
+async def test_native_activity_uses_only_bounded_list_metadata(activity):
+    client = native.NativeDesktop()
+    data = {
+        "schemaVersion": 4,
+        "pinnedThreads": [],
+        "threads": [{"id": "thread", "kind": "codex", "hostId": "local", "status": activity}],
+    }
+    client._call = AsyncMock(return_value=data)
+    assert await client.thread_status("thread") == activity
+    client._call.assert_awaited_once_with(
+        "thread", "account-manager-observation", "list_threads", {"limit": 50}
+    )
+
+
+@pytest.mark.parametrize("fault", ["schema", "missing", "remote", "chatgpt", "unknown", "conflict"])
+async def test_native_activity_rejects_unverified_identity(fault):
+    item = {"id": "thread", "kind": "codex", "hostId": "local", "status": "idle"}
+    data = {"schemaVersion": 4, "pinnedThreads": [], "threads": [item]}
+    if fault == "schema":
+        data["schemaVersion"] = 5
+    elif fault == "missing":
+        data["threads"] = []
+    elif fault == "remote":
+        item["hostId"] = "remote"
+    elif fault == "chatgpt":
+        item["kind"] = "chatgpt"
+    elif fault == "unknown":
+        item["status"] = "unknown"
+    else:
+        data["pinnedThreads"] = [{**item, "status": "active"}]
+    client = native.NativeDesktop()
+    client._call = AsyncMock(return_value=data)
+    with pytest.raises(AppServerError):
+        await client.thread_status("thread")
+
+
 async def test_desktop_continuation_does_not_navigate_renderer(migrated_db, monkeypatch):
     from codex_account_manager.platform import windows
 
@@ -142,6 +179,7 @@ def setup_native():
     source = {"id": "last", "status": "failed", "error": {"codexErrorInfo": "usageLimitExceeded"}}
     supervisor.native.latest_turn = AsyncMock(return_value=source)
     supervisor.native.send = AsyncMock(return_value={"accepted": True})
+    supervisor.native.thread_status = AsyncMock(return_value="idle")
     ticket = ContinuationTicket(
         "thread", "last", "acc-1", goal_signature(GoalInfo("thread", None, None, False)), True
     )
@@ -158,6 +196,38 @@ async def test_verified_lifecycle_does_not_require_native_history_loading():
 
     assert result == server.latest
     client.latest_turn.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", ["inProgress", "completed", "interrupted"])
+async def test_stored_interruption_requires_desktop_liveness(status):
+    server = ExecutionServer()
+    server.verified_stored_turn = AsyncMock(return_value={"id": "turn", "status": "interrupted"})
+    live = {"id": "turn", "status": status}
+    client = native.NativeDesktop()
+    client.latest_turn = AsyncMock(return_value=live)
+
+    assert await native.verified_desktop_turn(client, server, "thread", prefer_stored=True) == live
+    client.latest_turn.assert_awaited_once_with("thread")
+
+
+async def test_stored_interruption_is_unknown_when_desktop_cannot_be_read():
+    server = ExecutionServer()
+    server.verified_stored_turn = AsyncMock(return_value={"id": "turn", "status": "interrupted"})
+    client = native.NativeDesktop()
+    client.latest_turn = AsyncMock(side_effect=ConnectionNotReadyError("native unavailable"))
+
+    with pytest.raises(ConnectionNotReadyError):
+        await native.verified_desktop_turn(client, server, "thread", prefer_stored=True)
+
+
+async def test_verified_empty_history_does_not_trigger_native_loading():
+    server = ExecutionServer()
+    server.verified_stored_turn = AsyncMock(return_value=None)
+    client = native.NativeDesktop()
+    client.latest_turn = AsyncMock(
+        side_effect=AssertionError("No native loading for empty history")
+    )
+    assert await native.verified_desktop_turn(client, server, "thread", prefer_stored=True) is None
 
 
 async def test_unverified_history_size_cannot_fall_back_to_native_loading():
@@ -248,9 +318,15 @@ async def test_large_goal_opens_without_native_loading(migrated_db, monkeypatch,
     def open_goal(tid):
         opened.append(tid)
         server.verified_stored_turn.return_value = {"id": "new", "status": "inProgress"}
+        server.latest = {"id": "new", "status": "inProgress"}
+        supervisor.native.thread_status.return_value = "active"
 
     monkeypatch.setattr(windows, "open_conversation", open_goal)
     await supervisor.run(ticket)
+    if supervisor.goal_observer.tasks:
+        import asyncio
+
+        await asyncio.wait_for(asyncio.gather(*supervisor.goal_observer.tasks.values()), 2)
     await supervisor.run(ticket)
     assert opened == ([] if old_status == "uncertain" else ["thread"])
     supervisor.native.send.assert_not_awaited()
@@ -284,6 +360,32 @@ async def test_large_goal_preparation_releases_only_unsent_size_block(migrated_d
     async with connect() as db:
         assert not await (await db.execute("SELECT * FROM continuation_attempts")).fetchall()
     supervisor.native.send.assert_not_awaited()
+
+
+@pytest.mark.parametrize("old_status", ["history_too_large", "uncertain", "submitted", "sending"])
+async def test_newly_bounded_history_releases_only_unsent_size_block(migrated_db, old_status):
+    supervisor, _server, _source, ticket = setup_native()
+    async with connect() as db:
+        await db.execute(
+            "INSERT INTO continuation_attempts VALUES ('thread', 'last', 'prior', ?)",
+            (old_status,),
+        )
+        await db.commit()
+
+    async def send(*_args):
+        supervisor.native.latest_turn.return_value = {"id": "next", "status": "inProgress"}
+        return {"accepted": True}
+
+    supervisor.native.send.side_effect = send
+    await supervisor.run(ticket)
+    await supervisor.run(ticket)
+    if old_status == "history_too_large":
+        supervisor.native.send.assert_awaited_once_with("thread", "last")
+    else:
+        supervisor.native.send.assert_not_awaited()
+    async with connect() as db:
+        statuses = await (await db.execute("SELECT status FROM continuation_attempts")).fetchall()
+    assert statuses == [("submitted" if old_status == "history_too_large" else old_status,)]
 
 
 async def test_rejected_native_read_without_lifecycle_stays_unknown():
@@ -358,15 +460,52 @@ async def test_goal_activation_opens_once_without_sending_a_message(migrated_db,
     def open_thread(tid):
         opened.append(tid)
         supervisor.native.latest_turn.return_value = {"id": "resumed-goal", "status": "inProgress"}
+        server.latest = {"id": "resumed-goal", "status": "inProgress"}
+        supervisor.native.thread_status.return_value = "active"
 
     monkeypatch.setattr(windows, "open_conversation", open_thread)
     await supervisor.run(ticket)
+    import asyncio
+
+    await asyncio.wait_for(asyncio.gather(*supervisor.goal_observer.tasks.values()), 2)
     assert opened == ["thread"]
     supervisor.native.send.assert_not_awaited()
     assert (await supervisor.tracker.visible())[0].turn_status == "inProgress"
     await supervisor.run(ticket)
     assert opened == ["thread"]
     supervisor.native.send.assert_not_awaited()
+
+
+async def test_opened_goal_does_not_hold_account_lock_while_waiting(migrated_db, monkeypatch):
+    import asyncio
+    from dataclasses import replace
+
+    from codex_account_manager.continuity import desktop_goal
+    from codex_account_manager.core.operation_lock import OperationLock
+    from codex_account_manager.platform import windows
+
+    supervisor, server, source, ticket = setup_native()
+    server.native = GoalInfo("thread", "finish", "active", True, 2000, 100)
+    server.latest = source
+    ticket = replace(ticket, goal_signature=goal_signature(server.native))
+    opened = []
+    monkeypatch.setattr(windows, "open_conversation", lambda tid: opened.append(tid))
+
+    monkeypatch.setattr(desktop_goal, "POLL_SECONDS", 999)
+    checked = asyncio.Event()
+    probe = supervisor.goal_observer._probe
+
+    async def observe(*args, **kwargs):
+        result = await probe(*args, **kwargs)
+        checked.set()
+        return result
+
+    supervisor.goal_observer._probe = observe
+    await supervisor.run(ticket)
+    await asyncio.wait_for(checked.wait(), 2)
+    with OperationLock(migrated_db.data_dir / "account-operation.lock"):
+        assert supervisor.goal_observer.tasks
+    await supervisor.stop()
 
 
 async def test_goal_already_resumed_before_worker_is_observed_without_input(migrated_db):

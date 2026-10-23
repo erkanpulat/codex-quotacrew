@@ -9,6 +9,96 @@ from codex_account_manager.adapters.app_server import CodexAppServer
 from codex_account_manager.core.errors import AppServerError
 
 
+@pytest.mark.parametrize("status", ["completed", "failed", "interrupted", "inProgress"])
+async def test_paginated_history_observation_does_not_require_rollout_file(tmp_paths, status):
+    server = CodexAppServer(tmp_paths.shared_codex_home)
+
+    async def request(method, params):
+        if method == "thread/turns/list":
+            return {"data": [{"id": "turn", "status": status}]}
+        assert method == "thread/read" and params["includeTurns"] is False
+        return {
+            "thread": {
+                "id": "thread",
+                "historyMode": "paginated",
+                "path": str(tmp_paths.shared_codex_home / "sessions" / "absent.jsonl"),
+            }
+        }
+
+    server._request = request
+    server._request_with_discovery_retry = request
+    assert (await server.verified_stored_turn("thread"))["status"] == status
+    assert (await server.observed_turn("thread"))["status"] == status
+
+
+async def test_guardian_and_worker_sources_remain_distinct():
+    server = CodexAppServer("test")
+    source = {"subagent": {"other": "guardian"}}
+
+    async def request(method, params):
+        if method == "thread/list":
+            return {"data": [{"id": "thread", "source": source}], "nextCursor": None}
+        return {"thread": {"id": "thread", "source": source}}
+
+    server._request_with_discovery_retry = request
+    assert (await server.list_threads())[0].source == "subAgentGuardian"
+    assert await server.thread_source("thread") == "subAgentGuardian"
+    source = {"subagent": {"thread_spawn": {"parent_thread_id": "parent"}}}
+    assert (await server.list_threads())[0].source == "subAgentThreadSpawn"
+    assert await server.thread_source("thread") == "subAgentThreadSpawn"
+
+
+async def test_paginated_history_cannot_turn_a_disappearing_turn_into_empty_history():
+    server = CodexAppServer("test")
+    server.latest_turn = AsyncMock(side_effect=[{"id": "turn", "status": "inProgress"}, None])
+    server._request_with_discovery_retry = AsyncMock(
+        return_value={"thread": {"id": "thread", "historyMode": "paginated"}}
+    )
+    with pytest.raises(AppServerError):
+        await server.verified_stored_turn("thread")
+
+
+async def test_empty_paginated_history_requires_matching_thread_identity():
+    server = CodexAppServer("test")
+    server.latest_turn = AsyncMock(return_value=None)
+    server._request_with_discovery_retry = AsyncMock(
+        return_value={"thread": {"id": "wrong-thread", "historyMode": "paginated"}}
+    )
+    with pytest.raises(AppServerError):
+        await server.verified_stored_turn("thread")
+
+
+async def test_paginated_history_does_not_use_legacy_size_gate(tmp_paths):
+    server = CodexAppServer(tmp_paths.shared_codex_home)
+    server._request_with_discovery_retry = AsyncMock(
+        return_value={"thread": {"id": "thread", "historyMode": "paginated"}}
+    )
+    await server.require_bounded_desktop_history("thread")
+
+
+async def test_paginated_history_list_does_not_use_stale_rollout_revision(tmp_paths):
+    from codex_account_manager.continuity.scan import thread_revision
+
+    path = tmp_paths.shared_codex_home / "sessions" / "leftover.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("old data\n")
+    server = CodexAppServer(tmp_paths.shared_codex_home)
+    server._request_with_discovery_retry = AsyncMock(
+        return_value={
+            "data": [
+                {
+                    "id": "thread",
+                    "historyMode": "paginated",
+                    "path": str(path),
+                    "status": {"type": "notLoaded"},
+                }
+            ]
+        }
+    )
+    thread = (await server.list_threads())[0]
+    assert thread_revision(thread)[-1] is None
+
+
 async def test_failed_send_cleans_pending_request(monkeypatch):
     server = CodexAppServer("test", timeout=0.02)
     monkeypatch.setattr(server, "_send", AsyncMock(side_effect=AppServerError("broken pipe")))

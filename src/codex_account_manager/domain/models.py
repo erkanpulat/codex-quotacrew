@@ -114,6 +114,7 @@ class ThreadInfo:
     source: str | None = None
     project_id: str | None = None
     model_provider: str | None = None
+    history_mode: str | None = None
 
 
 class ThreadRecord(BaseModel):

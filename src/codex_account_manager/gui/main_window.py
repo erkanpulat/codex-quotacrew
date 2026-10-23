@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, QSignalBlocker, QSize, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
@@ -49,6 +50,7 @@ from codex_account_manager.gui.power import PowerView
 from codex_account_manager.gui.settings import SettingsView
 from codex_account_manager.gui.theme import application_palette, stylesheet
 from codex_account_manager.gui.widgets import label
+from codex_account_manager.monitoring.power import all_accounts_limited
 
 log = get_logger(__name__)
 
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         self._power_message = ""
         self._running_work = 0
         self._unverified_work = 0
+        self._work_snapshot: frozenset[tuple] = frozenset()
         self._continuation_issues: dict[str, str] = {}
         self._dismissed_continuation_issues: dict[str, str] = {}
         self._shared_waits: set[str] = set()
@@ -382,6 +385,24 @@ class MainWindow(QMainWindow):
         self.dashboard.refresh_work()
 
     def _work_changed(self, running: int, unverified: int) -> None:
+        snapshot = frozenset(
+            (
+                w.thread_id,
+                w.account_hash,
+                w.turn_id,
+                w.turn_status,
+                w.verified,
+                w.continuation_pending,
+            )
+            for w in self.conversations._tracked
+        )
+        if (
+            running > self._running_work
+            or unverified > self._unverified_work
+            or (snapshot != self._work_snapshot and (running or unverified))
+        ):
+            self.power_view.controls.invalidate()
+        self._work_snapshot = snapshot
         self._running_work = running
         self._unverified_work = unverified
         self._continuation_changed()
@@ -820,16 +841,15 @@ class MainWindow(QMainWindow):
             "switch.completed",
             "continuation.status",
         }:
-            if self.power_view.controls.plan.target is not None:
-                import time
-
-                from codex_account_manager.monitoring.power import PowerEvidence
-
-                self.power_view.controls.plan.observe(
-                    PowerEvidence(False, "Work is active or could not be verified."),
-                    time.monotonic(),
-                )
+            self.power_view.controls.invalidate()
         if event.topic == "health.updated":
+            target = self.power_view.controls.plan.target
+            if (
+                target is not None
+                and target.mode == "limits"
+                and not all_accounts_limited(event.payload["health"], datetime.now(UTC))
+            ):
+                self.power_view.controls.invalidate()
             self.dashboard._render(event.payload["health"])
             self.accounts_view._render(event.payload["health"])
         elif event.topic == "switch.suggested":
@@ -870,6 +890,8 @@ class MainWindow(QMainWindow):
                 "desktop_required": "Account switched. Continue the conversation in Codex Desktop to keep its browser and app tools.",
                 "running": "Continuing interrupted work automatically. Disable continuation in Settings to stop.",
                 "completed": "Automatic continuation finished. Review the result in Codex.",
+                "goal_opened": "The conversation was opened without a message; checking whether its goal resumes.",
+                "goal_reopened": "The conversation was opened once more; checking whether its goal resumes.",
                 "stopped": "Automatic continuation stopped. Your pauses and goal limits are preserved.",
                 "needs_user": "Automatic continuation needs attention. Open the conversation in Codex; approval, input or an error may require your action.",
                 "skipped": "Automatic continuation was skipped. See the work details.",

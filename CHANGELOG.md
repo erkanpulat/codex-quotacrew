@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-10-23
+
+- Verify Desktop activity independently of persisted interrupted turns.
+- Preserve eligible active goals across manual account changes without duplicate messages.
+- Observe goal activation independently with bounded retries and per-conversation failures.
+- Keep shutdown checks aware of pending goal activation and distinguish blocked, paused, changed and unverified goals.
+- Clarify continuation and shutdown messages without treating unknown results as failures.
+
 ## 0.3.0 — 2026-10-19
 
 - Separate account activation from individual continuation failures and reserve profile access through credential verification to prevent background-reader collisions.

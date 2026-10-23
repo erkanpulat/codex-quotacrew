@@ -64,6 +64,69 @@ async def _seed_two_profiles(migrated_db, accounts: AccountService):
     return p1, p2
 
 
+@pytest.mark.parametrize("same_supervisor", [False, True])
+@pytest.mark.parametrize("auto_continue", [False, True])
+async def test_manual_switch_stops_other_supervisor_without_clearing_tracking(
+    migrated_db, monkeypatch, same_supervisor, auto_continue
+):
+    import asyncio
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.continuity.automation import ContinuationSupervisor
+    from codex_account_manager.domain.states import HandoffReason
+    from tests.fakes import ExecutionServer
+
+    accounts = AccountService(app_server_factory=_factory("acc-2"))
+    await _seed_two_profiles(migrated_db, accounts)
+    monkeypatch.setattr(accounts, "resolve_active_alias", AsyncMock(return_value="ana"))
+    store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
+    store.write_active_atomic(b"source-auth")
+    server = ExecutionServer()
+    server.wait = True
+    run_turn = server.run_continuation_turn
+
+    async def interrupted_turn(*args, **kwargs):
+        try:
+            return await run_turn(*args, **kwargs)
+        except asyncio.CancelledError:
+            server.latest = {"id": "stopped", "status": "interrupted"}
+            raise
+
+    server.run_continuation_turn = interrupted_turn
+    supervisor = ContinuationSupervisor(factory=lambda: server)
+    ticket = replace(await supervisor.prepare("thread"), account_id="acc-1")
+    await supervisor.save_pending([ticket])
+    supervisor.launch_batch([ticket])
+    await asyncio.wait_for(server.started_turn.wait(), 2)
+    service = ContinuityService(accounts=accounts)
+    if same_supervisor:
+        service.automation = supervisor
+    monkeypatch.setattr(service, "observe_work", AsyncMock(return_value="acc-1"))
+    desktop = FakeDesktop()
+    tx = AuthTransaction(
+        credential_store=store,
+        desktop=desktop,
+        verify_account=AsyncMock(return_value="acc-2"),
+        lock_timeout=0.3,
+    )
+    try:
+        action = (
+            service.continue_on_limit("hesap2", reason=HandoffReason.MANUAL, transaction=tx)
+            if auto_continue
+            else service.handoff("hesap2", transaction=tx)
+        )
+        result = await asyncio.wait_for(action, 3)
+        assert result.success and result.account_id == "acc-2"
+        assert store.read_active() == b"{}"
+        assert desktop.stopped == desktop.launched == 1
+        assert len(server.turn_calls) == 1
+        assert supervisor._account_readers == 0
+        assert await service.tracker.ids("acc-1") == ["thread"]
+    finally:
+        await supervisor.stop()
+
+
 @pytest.mark.parametrize("block", [None, "monitor", "capacity", "claimed", "turn"])
 async def test_explicit_limit_recovery_checks_capacity_and_durable_claim(migrated_db, block):
     from codex_account_manager.core.errors import AppServerError
@@ -704,6 +767,10 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
         turn = {"id": f"next-{len(sends)}", "status": "inProgress"}
 
     service.automation.native.latest_turn = latest
+    fake.latest_turn = latest
+    service.automation.native.thread_status = AsyncMock(
+        side_effect=lambda _tid: "active" if turn["status"] == "inProgress" else "idle"
+    )
     service.automation.native.send = AsyncMock(side_effect=AssertionError("No message for goals"))
     monkeypatch.setattr(windows, "open_conversation", open_goal)
     await service.observe_work()
@@ -723,6 +790,9 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
         result = await service.continue_on_limit(alias, transaction=tx)
         assert result.success
         await asyncio.gather(*tuple(service.automation.tasks))
+        await asyncio.wait_for(
+            asyncio.gather(*tuple(service.automation.goal_observer.tasks.values())), 5
+        )
         assert sends[-1] == ("t-live", source_id, target)
         tracked = await service.tracker.visible()
         assert len(tracked) == 1 and tracked[0].turn_status == "inProgress"
@@ -730,6 +800,149 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
     assert len(sends) == 2
     assert not fake.resume_calls and not fake.set_goal_calls
     assert native_goal.token_budget == 5000 and native_goal.tokens_used == 100
+
+
+@pytest.mark.parametrize("resumes_on_launch", [False, True])
+@pytest.mark.parametrize("blocked_goal", [None, "paused", "unavailable", "idle", "late", "large"])
+async def test_manual_switch_preserves_live_goals_without_quota_error(
+    migrated_db, monkeypatch, resumes_on_launch, blocked_goal
+):
+    import asyncio
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.errors import DesktopContinuationRequired
+    from codex_account_manager.domain.states import HandoffReason
+    from codex_account_manager.platform import windows
+
+    accounts = AccountService(app_server_factory=_factory("acc-2"))
+    await _seed_two_profiles(migrated_db, accounts)
+    fake = FakeAppServer(
+        threads=[
+            replace(_thread(tid, 100), source="vscode" if tid != "cli" else "cli")
+            for tid in ("goal-one", "goal-two", "ordinary", "cli")
+        ],
+        turns={
+            tid: {"id": tid + "-turn", "status": "inProgress"}
+            for tid in ("goal-one", "goal-two", "ordinary", "cli")
+        },
+    )
+    goals = {
+        tid: GoalInfo(tid, "Finish " + tid, "active", True, 10000, 100)
+        for tid in ("goal-one", "goal-two")
+    }
+    if blocked_goal == "paused":
+        goals["goal-one"] = replace(goals["goal-one"], status="paused")
+
+    async def read_goal(tid):
+        if tid == "goal-one" and blocked_goal == "unavailable":
+            raise AppServerError("Goal unavailable")
+        return goals.get(tid, GoalInfo(tid, None, None, False))
+
+    fake.get_goal = read_goal
+    fake.is_desktop_thread = AsyncMock(side_effect=lambda tid: tid != "cli")
+
+    async def require_surface(tid):
+        if tid != "cli":
+            raise DesktopContinuationRequired("Desktop owns this work")
+
+    fake.require_headless_compatible = require_surface
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: fake)
+    service = ContinuityService(accounts=accounts)
+    service.automation.factory = lambda: fake
+    if blocked_goal in {"unavailable", "large"}:
+        await service.tracker.observe(
+            "acc-1", "goal-one", fake._turns["goal-one"], goals["goal-one"]
+        )
+    if blocked_goal == "late":
+        original_handoff = service.handoff
+
+        async def handoff_with_new_goal(*args, **kwargs):
+            fake._threads.append(replace(_thread("late", 100), source="vscode"))
+            fake._turns["late"] = {"id": "late-turn", "status": "inProgress"}
+            goals["late"] = GoalInfo("late", "Finish late", "active", True)
+            return await original_handoff(*args, **kwargs)
+
+        service.handoff = handoff_with_new_goal
+
+    async def native_latest(tid):
+        if blocked_goal == "large" and tid == "goal-one":
+            from codex_account_manager.core.errors import ConversationHistoryTooLargeError
+
+            raise ConversationHistoryTooLargeError("No full history loading")
+        return await fake.latest_turn(tid)
+
+    service.automation.native.latest_turn = native_latest
+    if blocked_goal == "large":
+        fake._turns["goal-one"]["status"] = "interrupted"
+    service.automation.native.thread_status = AsyncMock(
+        side_effect=lambda tid: (
+            "active"
+            if (
+                fake._turns[tid]["status"] == "inProgress"
+                or (tid == "goal-one" and blocked_goal == "large" and fake.account_id == "acc-1")
+            )
+            and not (tid == "goal-one" and blocked_goal == "idle")
+            else "notLoaded"
+        )
+    )
+    service.automation.native.send = AsyncMock(side_effect=AssertionError("No extra messages"))
+    opened = []
+
+    def open_goal(tid):
+        opened.append(tid)
+        # Desktop can resume the same turn identity rather than create a new one.
+        fake._turns[tid]["status"] = "inProgress"
+
+    monkeypatch.setattr(windows, "open_conversation", open_goal)
+
+    class Desktop(FakeDesktop):
+        def stop(self):
+            super().stop()
+            for tid in (*goals, "ordinary"):
+                fake._turns[tid]["status"] = "interrupted"
+
+        def launch(self):
+            super().launch()
+            if resumes_on_launch:
+                for tid in goals:
+                    if tid != "goal-one" or blocked_goal in {None, "late", "large"}:
+                        fake._turns[tid]["status"] = "inProgress"
+
+    store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
+    store.write_active_atomic(b"source-auth")
+
+    async def verify(_home):
+        fake.account_id = "acc-2"
+        return "acc-2"
+
+    desktop = Desktop()
+    result = await service.continue_on_limit(
+        "hesap2",
+        transaction=AuthTransaction(credential_store=store, desktop=desktop, verify_account=verify),
+        reason=HandoffReason.MANUAL,
+    )
+    assert result.success
+    ordinary = next(row for row in await service.tracker.visible() if row.thread_id == "ordinary")
+    assert not ordinary.verified, "A Desktop restart invalidates its old running evidence"
+    assert next(row for row in await service.tracker.visible() if row.thread_id == "cli").verified
+    await asyncio.gather(*tuple(service.automation.tasks))
+    await asyncio.wait_for(
+        asyncio.gather(*tuple(service.automation.goal_observer.tasks.values())), 5
+    )
+    eligible = ["goal-one", "goal-two"] if blocked_goal in {None, "late", "large"} else ["goal-two"]
+    if blocked_goal == "late":
+        eligible.append("late")
+    assert sorted(opened) == ([] if resumes_on_launch else eligible)
+    rows = {row.thread_id: row for row in await service.tracker.visible()}
+    for tid in eligible:
+        assert rows[tid].verified and rows[tid].turn_status == "inProgress"
+        assert not rows[tid].continuation_pending
+    if blocked_goal in {"paused", "unavailable", "idle"}:
+        assert not rows["goal-one"].verified
+    assert desktop.stopped == desktop.launched == 1
+    assert not fake.resume_calls and not fake.set_goal_calls
 
 
 @pytest.mark.parametrize("ide_failure", [None, "observation", "preparation", "running", "timeout"])

@@ -261,17 +261,11 @@ class ContinuityService:
                                 self._restart_blockers.add(thread_id)
 
                             if turn and goal is None:
-                                goal = GoalInfo(
-                                    thread_id=thread_id,
-                                    objective=None,
-                                    status=None,
-                                    present=False,
+                                raise AppServerError("Conversation goal could not be verified.")
+                            if not turn and thread_id in tracked_ids:
+                                raise AppServerError(
+                                    "Previously observed work has no verifiable turn."
                                 )
-                            goal_verifiable = goal is not None or not turn
-                            if not goal_verifiable:
-                                unavailable += 1
-                                completed.add(thread_id)
-                                return
 
                             new_turn = False
                             if turn and goal is not None:
@@ -428,6 +422,10 @@ class ContinuityService:
 
             raise ProfileNotFoundError(f"Profile not found: {target_alias}")
 
+        if reason == HandoffReason.MANUAL:
+            bus.publish("continuation.stop")
+            await self.automation.stop()
+
         from_alias = await self.accounts.resolve_active_alias()
         from_profile = await self.profiles.get_by_alias(from_alias) if from_alias else None
 
@@ -559,7 +557,9 @@ class ContinuityService:
         reason: HandoffReason = HandoffReason.USAGE_LIMITED,
     ) -> SwitchResult:
         """Commit the account handoff before starting any verified interrupted work."""
-        if self.automation.tasks:
+        if self.automation.tasks and reason == HandoffReason.MANUAL:
+            await self.automation.stop()
+        elif self.automation.tasks:
             raise AppServerError("An automatic continuation is still running.")
         generation = self.tracker.generation
 
@@ -585,6 +585,28 @@ class ContinuityService:
                 or self.tracker.generation != generation
             ):
                 raise HandoffDeferredError("Account switch stopped because monitoring changed.")
+            desktop_observations.update(set(await self.tracker.ids()) - self._restart_independent)
+            if reason != HandoffReason.MANUAL:
+                return
+            assert target is not None and target.bound_account_id is not None
+            candidate_goals = {
+                row.thread_id for row in await self.tracker.visible() if row.goal_present
+            }
+            for thread_id, _turn_id, _signature in await self.tracker.unfinished():
+                if thread_id not in candidate_goals or thread_id in desktop_threads:
+                    continue
+                try:
+                    async with asyncio.timeout(2):
+                        ticket = await self.automation.prepare(thread_id, running_goal_only=True)
+                    if ticket is None:
+                        continue
+                    queued = replace(ticket, account_id=target.bound_account_id)
+                    await self.automation.save_pending([queued])
+                    pending.append(queued)
+                    desktop_threads.append(thread_id)
+                    desktop_tickets.append(ticket)
+                except Exception:
+                    await self.automation.report(thread_id, "needs_user", "preparation")
 
         saved = (
             await self.tracker.unfinished()
@@ -599,6 +621,7 @@ class ContinuityService:
             await self.automation.report(thread_id, "needs_user", "verification")
         desktop_threads: list[str] = []
         desktop_tickets: list[ContinuationTicket] = []
+        desktop_observations: set[str] = set()
         for thread_id, turn_id, signature in saved:
             try:
                 async with asyncio.timeout(12):
@@ -636,6 +659,12 @@ class ContinuityService:
         except BaseException:
             await self.automation.discard_pending(pending)
             raise
+        try:
+            await self.tracker.unverified(list(desktop_observations))
+            bus.publish("work.observed")
+            bus.publish("monitor.refresh_requested")
+        except Exception:
+            log.warning("Account switch committed; Desktop observations could not be invalidated.")
         if account_id:
             try:
                 await self.tracker.clear(account_id, [ticket.thread_id for ticket in tickets])
@@ -687,6 +716,7 @@ class ContinuityService:
                             ticket.goal_signature,
                             desktop=ticket.desktop,
                             owner_id=ticket.owner_id,
+                            resume_active_goal=ticket.resume_active_goal,
                         )
                         for ticket in tickets
                     ]

@@ -254,6 +254,12 @@ async def _unavailable_work_state(db: aiosqlite.Connection) -> None:
     )
 
 
+async def _manual_goal_intent(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        "ALTER TABLE pending_continuations ADD COLUMN resume_active_goal INTEGER NOT NULL DEFAULT 0"
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "initial application schema", _initial_schema),
     Migration(2, "durable automatic continuation attempts", _create_continuation_attempts),
@@ -263,6 +269,7 @@ MIGRATIONS: list[Migration] = [
     Migration(6, "separate saved observations from verified activity", _work_verification),
     Migration(7, "preserve prepared continuation across process exits", _pending_continuations),
     Migration(8, "remember conversations awaiting revalidation", _unavailable_work_state),
+    Migration(9, "preserve manually handed off active goals", _manual_goal_intent),
 ]
 
 TARGET_VERSION = MIGRATIONS[-1].version

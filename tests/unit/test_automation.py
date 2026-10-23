@@ -310,6 +310,74 @@ async def test_batch_preserves_order_for_work_sharing_desktop(migrated_db):
     assert seen == ["thread", "second"]
 
 
+@pytest.mark.parametrize("stop_before_start", [False, True])
+async def test_stop_cancels_batch_before_a_conversation_run_starts(migrated_db, stop_before_start):
+    from unittest.mock import AsyncMock
+
+    supervisor = ContinuationSupervisor(factory=ExecutionServer)
+    ticket = await prepared(supervisor)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed_enabled():
+        entered.set()
+        await release.wait()
+        return True
+
+    supervisor.enabled = delayed_enabled
+    supervisor.run = AsyncMock()
+    supervisor.launch_batch([ticket])
+    tasks = tuple(supervisor.tasks)
+    if not stop_before_start:
+        await asyncio.wait_for(entered.wait(), 2)
+    bus.publish("continuation.stop")
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 2)
+    supervisor.run.assert_not_awaited()
+
+
+@pytest.mark.parametrize("scope", ["desktop", "ide"])
+@pytest.mark.parametrize("stop_before_start", [False, True])
+async def test_scoped_stop_before_batch_run_preserves_other_surfaces(
+    migrated_db, scope, stop_before_start
+):
+    from unittest.mock import AsyncMock
+
+    await SettingsRepository().set("ide_continue", "true")
+    supervisor = ContinuationSupervisor(factory=ExecutionServer)
+    ticket = await prepared(supervisor)
+    entered, release = asyncio.Event(), asyncio.Event()
+    readers = 0
+
+    async def delayed_enabled():
+        nonlocal readers
+        readers += 1
+        if readers == 3:
+            entered.set()
+        await release.wait()
+        return True
+
+    supervisor.enabled = delayed_enabled
+    supervisor.run = AsyncMock()
+    supervisor.launch_batch(
+        [
+            replace(ticket, thread_id="ide", desktop=True, owner_id="owner"),
+            replace(ticket, thread_id="desktop", desktop=True),
+            replace(ticket, thread_id="cli"),
+        ]
+    )
+    tasks = tuple(supervisor.tasks)
+    if not stop_before_start:
+        await asyncio.wait_for(entered.wait(), 2)
+    bus.publish("continuation.stop", scope=scope)
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*tasks), 2)
+    assert {call.args[0].thread_id for call in supervisor.run.await_args_list} == {
+        "ide",
+        "desktop",
+        "cli",
+    } - {scope}
+
+
 async def test_stalled_ide_does_not_delay_desktop_or_cli(migrated_db, monkeypatch):
     import codex_account_manager.continuity.automation as module
 

@@ -627,6 +627,36 @@ def test_tracked_work_explains_turn_and_goal_without_storing_objective(window):
             ("sent again", "tekrar gönderil"),
         ),
         (False, None, ("Check in Codex", "Codex'te kontrol gerekli"), ("queued", "sırada")),
+        (
+            True,
+            "goal_opened",
+            ("Waiting for goal to resume", "Hedefin devam etmesi bekleniyor"),
+            ("60 seconds", "60 saniye"),
+        ),
+        (
+            True,
+            "goal_reopened",
+            ("Waiting for goal to resume", "Hedefin devam etmesi bekleniyor"),
+            ("60 seconds", "60 saniye"),
+        ),
+        (
+            False,
+            "goal_opened",
+            ("Goal resumption unconfirmed", "Hedefin devam ettiği doğrulanamadı"),
+            ("no automatic", "başka otomatik"),
+        ),
+        (
+            False,
+            "goal_unconfirmed",
+            ("Goal resumption unconfirmed", "Hedefin devam ettiği doğrulanamadı"),
+            ("no automatic", "başka otomatik"),
+        ),
+        (
+            False,
+            "goal_stopped",
+            ("Goal activation stopped", "Hedef açma durduruldu"),
+            ("state changed", "durumu değişti"),
+        ),
     ],
 )
 def test_tracked_work_explains_desktop_continuation(
@@ -1330,6 +1360,118 @@ def test_cancel_ignores_pending_power_check_result(window, monkeypatch):
     assert widget.plan.target is None
     assert not widget.timer.isActive()
     shutdown.assert_not_called()
+
+
+def test_new_work_event_invalidates_inflight_shutdown_evidence(window, monkeypatch):
+    from codex_account_manager.core.events import Event
+    from codex_account_manager.monitoring.power import PowerEvidence, PowerTarget
+
+    widget = window.power_view.controls
+    callbacks = []
+
+    def submit(coro, on_result=None, on_error=None):
+        coro.close()
+        callbacks.append(on_result)
+
+    monkeypatch.setattr(widget.runner, "submit", submit)
+    widget.plan.arm(PowerTarget("limits"))
+    widget._tick()
+    window._domain_event(Event("continuation.status", {"state": "running"}))
+    callbacks.pop(0)(PowerEvidence(True, "old snapshot", "accounts"))
+    assert widget.plan.deadline is None
+
+
+@pytest.mark.parametrize("mode", ["limits", "work", "timer"])
+@pytest.mark.parametrize("change", ["running", "unverified", "quota"])
+def test_new_work_or_capacity_resets_applicable_countdown(window, mode, change):
+    from codex_account_manager.core.events import Event
+    from codex_account_manager.monitoring.power import PowerEvidence, PowerTarget
+
+    widget = window.power_view.controls
+    widget.plan.arm(PowerTarget(mode, "thread", None, "turn"), now=time.monotonic())
+    widget.plan.observe(PowerEvidence(True, "done", "accounts"), time.monotonic())
+    deadline = widget.plan.deadline
+    assert deadline is not None
+    if change in {"running", "unverified"}:
+        window._work_changed(int(change == "running"), int(change == "unverified"))
+    else:
+        window._domain_event(Event("health.updated", {"health": sample_profiles()}))
+    should_reset = mode != "timer" and (change != "quota" or mode == "limits")
+    assert widget.plan.deadline == (None if should_reset else deadline)
+
+
+def test_confirmed_exhausted_accounts_do_not_restart_countdown(window):
+    from dataclasses import replace
+    from datetime import UTC, datetime
+
+    from codex_account_manager.core.events import Event
+    from codex_account_manager.domain.states import QuotaState
+    from codex_account_manager.monitoring.power import PowerEvidence, PowerTarget
+
+    health = [
+        replace(
+            sample_profiles()[0],
+            auth_present=True,
+            account_match=True,
+            error=None,
+            stale=False,
+            reauth_required=False,
+            primary_window_minutes=300,
+            primary_used_percent=100,
+            ordinary_usage_allowed=False,
+            quota_state=QuotaState.LIMITED_NO_RESET,
+            last_checked_at=datetime.now(UTC),
+        )
+    ]
+    widget = window.power_view.controls
+    widget.plan.arm(PowerTarget("limits"))
+    widget.plan.observe(PowerEvidence(True, "done", "accounts"), time.monotonic())
+    deadline = widget.plan.deadline
+    window._domain_event(Event("health.updated", {"health": health}))
+    assert deadline is not None and widget.plan.deadline == deadline
+
+
+def test_unchanged_tracking_badges_do_not_override_fresh_shutdown_evidence(window):
+    from codex_account_manager.monitoring.power import PowerEvidence, PowerTarget
+
+    window._work_changed(0, 1)
+    widget = window.power_view.controls
+    widget.plan.arm(PowerTarget("limits"))
+    widget.plan.observe(PowerEvidence(True, "fresh check", "accounts"), time.monotonic())
+    deadline = widget.plan.deadline
+    window._work_changed(0, 1)
+    assert deadline is not None and widget.plan.deadline == deadline
+
+
+@pytest.mark.parametrize("replacement", ["conversation", "turn"])
+def test_same_count_with_new_work_discards_inflight_shutdown_evidence(
+    window, monkeypatch, replacement
+):
+    from dataclasses import replace
+
+    from codex_account_manager.continuity.tracking import ObservedWork
+    from codex_account_manager.monitoring.power import PowerEvidence, PowerTarget
+
+    work = ObservedWork("one", "account", "inProgress", None, False, False, time.time())
+    window.conversations._render_tracking(([work], {}))
+    widget = window.power_view.controls
+    callbacks = []
+
+    def submit(coro, on_result=None, on_error=None):
+        coro.close()
+        callbacks.append(on_result)
+
+    monkeypatch.setattr(widget.runner, "submit", submit)
+    widget.plan.arm(PowerTarget("limits"))
+    widget._tick()
+    changed = (
+        replace(work, thread_id="two")
+        if replacement == "conversation"
+        else replace(work, turn_id="next")
+    )
+    window.conversations._render_tracking(([changed], {}))
+    callbacks.pop(0)(PowerEvidence(True, "old snapshot", "accounts"))
+    assert widget.plan.deadline is None
 
 
 def test_quit_cancels_shutdown_plan(window, monkeypatch):

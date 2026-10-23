@@ -15,7 +15,7 @@ from codex_account_manager.adapters.credential_store import ProfileAuthSession
 from codex_account_manager.adapters.interfaces import CapabilitySet, GoalInfo, ServerInfo
 from codex_account_manager.adapters.subscription import subscription_period
 from codex_account_manager.codex.runtime import codex_command, profile_environment
-from codex_account_manager.codex.status import normalize_turn_status
+from codex_account_manager.codex.status import normalize_thread_source, normalize_turn_status
 from codex_account_manager.core.child_process import (
     ChildProcessLifetime,
     finish_cleanup,
@@ -574,15 +574,10 @@ class CodexAppServer:
                     id=item["id"],
                     preview=item.get("preview"),
                     title=item.get("name"),
-                    source=(
-                        item.get("source")
-                        if isinstance(item.get("source"), str)
-                        else "subAgent"
-                        if isinstance(item.get("source"), dict)
-                        else "unknown"
-                    ),
+                    source=normalize_thread_source(item.get("source")),
                     project_id=item.get("projectId"),
                     model_provider=item.get("modelProvider"),
+                    history_mode=item.get("historyMode"),
                     cwd=item.get("cwd"),
                     path=item.get("path"),
                     model=item.get("model"),
@@ -606,8 +601,7 @@ class CodexAppServer:
         thread = result.get("thread")
         if not isinstance(thread, dict) or thread.get("id") != thread_id:
             raise AppServerError("Conversation identity could not be verified.")
-        source = thread.get("source")
-        return source if isinstance(source, str) else "unknown"
+        return normalize_thread_source(thread.get("source"))
 
     async def require_headless_compatible(self, thread_id: str) -> None:
         source = await self.thread_source(thread_id)
@@ -706,7 +700,11 @@ class CodexAppServer:
             "thread/read", {"threadId": thread_id, "includeTurns": False}
         )
         thread = result.get("thread") or {}
-        if thread.get("id") != thread_id or not isinstance(thread.get("path"), str):
+        if thread.get("id") != thread_id:
+            raise AppServerError("Could not verify the live conversation state.")
+        if thread.get("historyMode") == "paginated":
+            return await self._paginated_turn(thread_id, turn)
+        if not isinstance(thread.get("path"), str):
             raise AppServerError("Could not verify the live conversation state.")
         from codex_account_manager.codex.turn_activity import read_turn_activity
 
@@ -720,13 +718,17 @@ class CodexAppServer:
     async def verified_stored_turn(self, thread_id: str) -> dict | None:
         """Corroborate the latest persisted turn with bounded lifecycle metadata."""
         turn = await self.latest_turn(thread_id)
-        if not turn:
-            return None
         result = await self._request_with_discovery_retry(
             "thread/read", {"threadId": thread_id, "includeTurns": False}
         )
         thread = result.get("thread") or {}
-        if thread.get("id") != thread_id or not isinstance(thread.get("path"), str):
+        if thread.get("id") != thread_id:
+            raise AppServerError("Could not verify the live conversation state.")
+        if thread.get("historyMode") == "paginated":
+            return await self._paginated_turn(thread_id, turn)
+        if not turn:
+            raise AppServerError("Empty legacy history could not be verified.")
+        if not isinstance(thread.get("path"), str):
             raise AppServerError("Could not verify the live conversation state.")
         from codex_account_manager.codex.turn_activity import read_turn_activity
 
@@ -739,6 +741,19 @@ class CodexAppServer:
             return turn
         return {**turn, "status": state}
 
+    async def _paginated_turn(self, thread_id: str, previous: dict | None) -> dict | None:
+        current = await self.latest_turn(thread_id)
+        if previous and current is None:
+            raise AppServerError("The conversation turn disappeared during observation.")
+        if current and current.get("status") not in {
+            "inProgress",
+            "completed",
+            "failed",
+            "interrupted",
+        }:
+            raise AppServerError("The paginated conversation state is unsupported.")
+        return current
+
     async def require_bounded_desktop_history(self, thread_id: str) -> None:
         from codex_account_manager.core.errors import ConversationHistoryTooLargeError
         from codex_account_manager.core.files import resolved_path
@@ -747,7 +762,11 @@ class CodexAppServer:
             "thread/read", {"threadId": thread_id, "includeTurns": False}
         )
         thread = result.get("thread") or {}
-        if thread.get("id") != thread_id or not isinstance(thread.get("path"), str):
+        if thread.get("id") != thread_id:
+            raise AppServerError("Conversation history size could not be verified.")
+        if thread.get("historyMode") == "paginated":
+            return
+        if not isinstance(thread.get("path"), str):
             raise AppServerError("Conversation history size could not be verified.")
         path = resolved_path(thread["path"])
         if not path.is_relative_to(resolved_path(Path(self.codex_home) / "sessions")):

@@ -227,3 +227,18 @@ async def test_existing_accounts_and_signins_survive_startup(tmp_paths):
     auth.write_bytes(b"synthetic-login")
     assert await migrate() == TARGET_VERSION
     assert auth.read_bytes() == b"synthetic-login"
+
+
+async def test_pending_quota_intent_survives_manual_goal_migration(tmp_paths):
+    await migrate()
+    with sqlite3.connect(tmp_paths.db_path) as db:
+        db.execute("ALTER TABLE pending_continuations DROP COLUMN resume_active_goal")
+        db.execute("UPDATE schema_meta SET value='8'")
+        db.execute(
+            "INSERT INTO pending_continuations VALUES ('thread','turn','account','goal',1,NULL,100)"
+        )
+    assert await migrate() == TARGET_VERSION
+    with sqlite3.connect(tmp_paths.db_path) as db:
+        assert db.execute("SELECT * FROM pending_continuations").fetchall() == [
+            ("thread", "turn", "account", "goal", 1, None, 100.0, 0)
+        ]

@@ -25,6 +25,165 @@ def _health(alias, **kwargs):
     )
 
 
+@pytest.mark.parametrize("mode", ["limits", "work"])
+async def test_internal_guardians_do_not_block_but_running_workers_do(
+    migrated_db, monkeypatch, mode
+):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import FakeAppServer
+    from tests.integration.test_limit_continuation import _thread
+
+    guardians = [
+        replace(_thread(f"guardian-{i}", i), source="subAgentGuardian") for i in range(2051)
+    ]
+    root = replace(_thread("root", 2052), source="vscode")
+    worker = replace(_thread("worker", 2053), source="subAgentThreadSpawn")
+    server = FakeAppServer(threads=[*guardians, root, worker])
+    server.is_desktop_thread = AsyncMock(return_value=True)
+    server.get_goal = AsyncMock(side_effect=lambda tid: GoalInfo(tid, None, None, False))
+    turns = {
+        "root": {"id": "turn", "status": "completed"},
+        "worker": {"id": "child-turn", "status": "completed"},
+    }
+
+    async def stored(tid):
+        assert tid in turns, "Internal records must not be inspected as work"
+        return turns[tid]
+
+    server.verified_stored_turn = stored
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    accounts = AsyncMock()
+    accounts.all_health.side_effect = lambda: [
+        _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    ]
+    checks = power.PowerChecks(accounts)
+    target = PowerTarget(mode, "root", None, "turn") if mode == "work" else PowerTarget(mode)
+    assert (await checks.check(target)).ready
+    turns["worker"]["status"] = "inProgress"
+    evidence = await checks.check(target)
+    assert not evidence.ready and evidence.values["count"] == 1
+    assert "worker" in evidence.values["jobs"]
+    turns["worker"] = None
+    assert not (await checks.check(target)).ready
+
+    fresh_checks = power.PowerChecks(accounts)
+    assert (await fresh_checks.check(target)).ready
+
+
+async def test_shutdown_choices_exclude_internal_history_without_truncating_roots(
+    migrated_db, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import FakeAppServer
+    from tests.integration.test_limit_continuation import _thread
+
+    roots = [replace(_thread(str(i), i), source="cli") for i in range(1002)]
+    server = FakeAppServer(threads=[*roots])
+    server.observed_turn = AsyncMock(
+        side_effect=lambda tid: {
+            "id": "turn",
+            "status": "inProgress" if tid == "1001" else "completed",
+        }
+    )
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    choices = await power.PowerChecks(AsyncMock()).conversations()
+    assert [tid for tid, _ in choices] == ["1001"]
+
+
+async def test_running_turn_disappearing_cannot_trigger_shutdown(migrated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import FakeAppServer
+    from tests.integration.test_limit_continuation import _thread
+
+    server = FakeAppServer(threads=[replace(_thread("root", 1), source="cli")])
+    server.observed_turn = AsyncMock(return_value={"id": "turn", "status": "inProgress"})
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    accounts = AsyncMock()
+    accounts.all_health.side_effect = lambda: [
+        _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    ]
+    checks = power.PowerChecks(accounts)
+    assert not (await checks.check(PowerTarget("limits"))).ready
+    server.observed_turn.return_value = None
+    assert not (await checks.check(PowerTarget("limits"))).ready
+
+
+@pytest.mark.parametrize("mode", ["limits", "work"])
+async def test_stored_interruption_cannot_hide_live_desktop_work(migrated_db, monkeypatch, mode):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.adapters.native_desktop import NativeDesktop
+    from codex_account_manager.core.errors import ConnectionNotReadyError
+    from codex_account_manager.monitoring import power
+    from tests.fakes import FakeAppServer
+    from tests.integration.test_limit_continuation import _thread
+
+    threads = [replace(_thread(tid, 100), source="vscode") for tid in ("root", "other")]
+    server = FakeAppServer(threads=threads)
+    server.is_desktop_thread = AsyncMock(return_value=True)
+    server.verified_stored_turn = AsyncMock(return_value={"id": "turn", "status": "interrupted"})
+    live = {"root": "completed", "other": "inProgress"}
+
+    async def latest(tid):
+        return {"id": "turn", "status": live[tid]}
+
+    native = AsyncMock(side_effect=latest)
+    monkeypatch.setattr(NativeDesktop, "latest_turn", native)
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    accounts = AsyncMock()
+    accounts.all_health.side_effect = lambda: [
+        _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    ]
+    target = PowerTarget(mode, "root", None, "turn") if mode == "work" else PowerTarget(mode)
+
+    assert not (await power.PowerChecks(accounts).check(target)).ready
+    native.side_effect = ConnectionNotReadyError("synthetic unavailable desktop")
+    assert not (await power.PowerChecks(accounts).check(target)).ready
+
+
+async def test_shutdown_reads_ide_work_even_when_continuation_is_disabled(migrated_db, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.adapters.native_ide import NativeIDE
+    from codex_account_manager.monitoring import power
+    from tests.fakes import FakeAppServer
+    from tests.integration.test_limit_continuation import _thread
+
+    server = FakeAppServer(threads=[replace(_thread("root", 1), source="vscode")])
+    monkeypatch.setattr(
+        NativeIDE,
+        "inspect",
+        AsyncMock(
+            return_value=SimpleNamespace(turn={"id": "turn", "status": "inProgress"}, blocked=False)
+        ),
+    )
+    assert (await power.PowerChecks(AsyncMock())._turn(server, "root"))["status"] == "inProgress"
+
+
+async def test_closed_ide_owner_can_use_verified_finished_history(migrated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.adapters.native_ide import NativeIDE
+    from codex_account_manager.core.errors import OwnerNotFoundError
+    from codex_account_manager.monitoring import power
+    from tests.fakes import FakeAppServer
+    from tests.integration.test_limit_continuation import _thread
+
+    server = FakeAppServer(threads=[replace(_thread("root", 1), source="vscode")])
+    server.verified_stored_turn = AsyncMock(return_value={"id": "turn", "status": "completed"})
+    monkeypatch.setattr(
+        NativeIDE, "inspect", AsyncMock(side_effect=OwnerNotFoundError("not loaded"))
+    )
+    assert (await power.PowerChecks(AsyncMock())._turn(server, "root"))["status"] == "completed"
+
+
 def test_shutdown_requires_arming_and_fresh_continuous_evidence():
     plan = ShutdownPlan(60)
     good = PowerEvidence(True, "done", "accounts-a-b")
@@ -299,7 +458,7 @@ async def test_many_old_conversations_do_not_block_shutdown_but_one_running_does
     checks._turn = turn
     evidence = await checks.check(PowerTarget("limits"))
     assert not evidence.ready
-    assert evidence.values == {"count": 1}
+    assert evidence.values["count"] == 1
 
     checks._turn = AsyncMock(return_value=None)
     assert not (await checks.check(PowerTarget("limits"))).ready
@@ -327,6 +486,43 @@ async def test_completed_work_waits_for_pending_independent_continuation(migrate
     target = PowerTarget("work", "thread", None, "original")
     assert not (await checks.check(target)).ready
     await supervisor.discard_pending([ticket])
+    assert (await checks.check(target)).ready
+
+
+@pytest.mark.parametrize("mode", ["work", "limits"])
+@pytest.mark.parametrize("manual_goal", [False, True])
+async def test_pending_goal_activation_blocks_conditional_shutdown(
+    migrated_db, monkeypatch, mode, manual_goal
+):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.continuity.automation import (
+        ContinuationSupervisor,
+        ContinuationTicket,
+    )
+    from codex_account_manager.monitoring import power
+    from tests.fakes import ExecutionServer
+    from tests.integration.test_limit_continuation import _thread
+
+    server = ExecutionServer()
+    server.list_threads = AsyncMock(return_value=[_thread("thread", 1)])
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    accounts = AsyncMock()
+    accounts.all_health.side_effect = lambda: [
+        _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    ]
+    checks = power.PowerChecks(accounts)
+    checks._turn = AsyncMock(return_value={"id": "complete", "status": "completed"})
+    ticket = ContinuationTicket(
+        "other", "stopped", "acc-1", "signature", desktop=True, resume_active_goal=manual_goal
+    )
+    owner = ContinuationSupervisor()
+    await owner._claim(ticket)
+    await owner.goal_observer.opened(ticket)
+    target = PowerTarget(mode, "thread", None, "original") if mode == "work" else PowerTarget(mode)
+    evidence = await checks.check(target)
+    assert not evidence.ready and evidence.reason == "Waiting for {count} goals to resume."
+    await owner.goal_observer._finish(ticket, "goal_unconfirmed", "needs_user")
     assert (await checks.check(target)).ready
 
 
@@ -434,4 +630,55 @@ async def test_interrupted_scans_eventually_visit_every_conversation(migrated_db
     checks._turn = AsyncMock(return_value=None)
     evidence = await checks.check(PowerTarget("limits"))
     assert not evidence.ready
-    assert evidence.values == {"count": 12}
+    assert evidence.values["count"] == 12
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        (
+            "blocked",
+            "The selected goal is blocked. Open the conversation in Codex to review what it needs.",
+        ),
+        ("paused", "The selected goal is paused. Shutdown will wait for it to complete."),
+        (
+            "usageLimited",
+            "The selected goal reached its usage limit. Shutdown will wait for it to resume and complete.",
+        ),
+        ("active", "The selected goal is still active. Shutdown will wait for it to complete."),
+        ("changed", "The selected goal changed. Cancel this plan and select the work again."),
+        (
+            "missing",
+            "The selected goal is no longer present. Cancel this plan and select the work again.",
+        ),
+        (
+            "unknown",
+            "The selected goal could not be verified. Shutdown is waiting for a fresh check.",
+        ),
+    ],
+)
+async def test_shutdown_explains_selected_goal_state(migrated_db, monkeypatch, state, expected):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import ExecutionServer
+    from tests.integration.test_limit_continuation import _thread
+
+    original = GoalInfo("thread", "original", "active", True)
+    goal = replace(original, status=state)
+    if state == "changed":
+        goal = replace(original, objective="different")
+    elif state == "missing":
+        goal = GoalInfo("thread", None, None, False)
+    elif state == "unknown":
+        goal = None
+    server = ExecutionServer()
+    server.list_threads = AsyncMock(return_value=[_thread("thread", 1)])
+    server.get_goal = AsyncMock(return_value=goal)
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    checks = power.PowerChecks(AsyncMock())
+    checks._turn = AsyncMock(return_value={"id": "turn", "status": "completed"})
+    target = PowerTarget("work", "thread", goal_signature(original), "turn")
+    evidence = await checks.check(target)
+    assert not evidence.ready
+    assert evidence.reason == expected

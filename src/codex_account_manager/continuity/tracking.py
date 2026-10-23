@@ -41,6 +41,7 @@ class ObservedWork:
     unavailable_reason: str | None = None
     continuation_pending: bool = False
     continuation_status: str | None = None
+    turn_id: str | None = None
 
 
 class WorkTracker:
@@ -60,6 +61,7 @@ class WorkTracker:
     async def visible(
         self, account_id: str | None = None, *, verified_only: bool = False
     ) -> list[ObservedWork]:
+        from codex_account_manager.continuity.desktop_goal import OBSERVATION_SECONDS
         from codex_account_manager.monitoring.settings import poll_interval
         from codex_account_manager.storage.repositories import SettingsRepository
 
@@ -75,12 +77,18 @@ class WorkTracker:
                     WHERE pending.thread_id=observed_work.thread_id
                       AND pending.turn_id=observed_work.turn_id
                       AND pending.created_at > ? AND pending.created_at <= ?
+                      AND (pending.created_at > ? OR NOT EXISTS (
+                          SELECT 1 FROM continuation_attempts AS activation
+                          WHERE activation.thread_id=pending.thread_id
+                            AND activation.source_turn_id=pending.turn_id
+                            AND activation.status IN ('goal_opened','goal_reopened')
+                      ))
                 ),
                 (
                     SELECT attempts.status FROM continuation_attempts AS attempts
                     WHERE attempts.thread_id=observed_work.thread_id
                       AND attempts.source_turn_id=observed_work.turn_id
-                )
+                ), turn_id
                 FROM observed_work
                     WHERE account_hash <> '' AND observed_at >= ?
                       AND (? = 0 OR (verified=1 AND observed_at BETWEEN ? AND ?))
@@ -89,6 +97,7 @@ class WorkTracker:
                     (
                         now - 600,
                         now,
+                        now - OBSERVATION_SECONDS,
                         now - 86400,
                         int(verified_only),
                         now - freshness,
@@ -111,6 +120,7 @@ class WorkTracker:
                 unavailable_reason=row[8],
                 continuation_pending=bool(row[9]),
                 continuation_status=row[10],
+                turn_id=row[11],
             )
             for row in rows
         ]
@@ -254,6 +264,11 @@ class WorkTracker:
                     ):
                         await db.execute(
                             "DELETE FROM observed_work WHERE thread_id=?", (thread_id,)
+                        )
+                        await db.commit()
+                    else:
+                        await db.execute(
+                            "UPDATE observed_work SET verified=0 WHERE thread_id=?", (thread_id,)
                         )
                         await db.commit()
                     return

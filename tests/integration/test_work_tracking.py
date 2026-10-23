@@ -128,6 +128,15 @@ async def test_manual_account_switch_does_not_hide_previously_tracked_jobs(
     assert {row.thread_id for row in rows} == {"one", "two", "three", "four"}
 
 
+async def test_stopped_turn_on_new_account_cannot_keep_verified_running_badge(migrated_db):
+    tracker = WorkTracker()
+    goal = GoalInfo("thread", "Continue this goal", "active", True)
+    await tracker.observe("old", "thread", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.observe("new", "thread", {"id": "turn", "status": "interrupted"}, goal)
+    row = (await tracker.visible())[0]
+    assert not (row.verified and row.turn_status == "inProgress")
+
+
 async def test_unavailable_tracked_owner_blocks_restart_during_cooldown(migrated_db, monkeypatch):
     import pytest
 
@@ -249,6 +258,57 @@ async def test_two_desktop_threads_capture_fast_quota_turn_between_polls(migrate
     assert {row[0] for row in await service.tracker.limited("account-a")} == {"one", "two"}
 
 
+async def test_two_live_desktop_jobs_are_tracked_despite_stored_interruption(
+    migrated_db, monkeypatch
+):
+    import pytest
+
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.core.errors import ConnectionNotReadyError, HandoffDeferredError
+
+    stored = {tid: {"id": f"turn-{tid}", "status": "interrupted"} for tid in ("one", "two")}
+    live = {tid: {**turn, "status": "inProgress"} for tid, turn in stored.items()}
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[
+            replace(
+                _thread(tid, 100), source="vscode", history_mode="paginated", status="notLoaded"
+            )
+            for tid in stored
+        ],
+        turns=stored,
+    )
+    server.is_desktop_thread = AsyncMock(return_value=True)
+    server.verified_stored_turn = AsyncMock(side_effect=server.latest_turn)
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
+    service = ContinuityService()
+
+    async def latest(tid):
+        return live[tid]
+
+    service.automation.native.latest_turn = AsyncMock(side_effect=latest)
+    await service.observe_work()
+    saved = await service.tracker.visible()
+    assert {row.thread_id for row in saved if row.verified and row.turn_status == "inProgress"} == {
+        "one",
+        "two",
+    }
+    assert service._work_running
+    with pytest.raises(HandoffDeferredError):
+        await service._require_restart_safe()
+
+    async def partial(tid):
+        if tid == "one":
+            raise ConnectionNotReadyError("synthetic unavailable job")
+        return live[tid]
+
+    service.automation.native.latest_turn.side_effect = partial
+    await service.observe_work()
+    saved = {row.thread_id: row for row in await service.tracker.visible()}
+    assert not saved["one"].verified
+    assert saved["two"].verified and saved["two"].turn_status == "inProgress"
+
+
 async def test_new_failed_turn_after_restart_preserves_observed_work(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
@@ -345,10 +405,66 @@ async def test_unverifiable_goal_keeps_checkpoint_for_later_revalidation(migrate
     server.get_goal = lambda _thread_id: _unknown_goal()
     monkeypatch.setattr(module, "CodexAppServer", lambda _, **kwargs: server)
     await ContinuityService().observe_work()
-    # Failed turn with usageLimitExceeded is treated as limited even if goal is unverifiable
-    assert await tracker.limited("account-a")
+    assert not await tracker.limited("account-a")
     saved = await tracker.visible()
     assert len(saved) == 1 and saved[0].thread_id == "thread" and saved[0].limited
+    assert not saved[0].verified
+
+
+async def test_unknown_goal_preserves_known_goal_without_blocking_other_observations(
+    migrated_db, monkeypatch
+):
+    import codex_account_manager.continuity.service as module
+    from codex_account_manager.continuity.tracking import goal_signature
+
+    service = ContinuityService()
+    goal = GoalInfo("unknown", "finish the design", "active", True, 2000)
+    await service.tracker.observe(
+        "account-a", "unknown", {"id": "running", "status": "inProgress"}, goal
+    )
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[_thread("unknown", 100), _thread("independent", 99)],
+        turns={
+            "unknown": _limited_turn(),
+            "independent": {"id": "other", "status": "inProgress"},
+        },
+    )
+    server.get_goal = AsyncMock(
+        side_effect=lambda tid: None if tid == "unknown" else GoalInfo(tid, None, None, False)
+    )
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_a, **_k: server)
+    await service.observe_work()
+    rows = {row.thread_id: row for row in await service.tracker.visible()}
+    assert ("unknown", "running", goal_signature(goal)) in await service.tracker.unfinished()
+    assert rows["unknown"].goal_status == "active"
+    assert not rows["unknown"].verified
+    assert rows["independent"].verified
+
+
+async def test_empty_history_keeps_known_work_until_terminal_turn_is_verified(
+    migrated_db, monkeypatch
+):
+    import codex_account_manager.continuity.service as module
+
+    service = ContinuityService()
+    server = FakeAppServer(
+        account_id="account-a",
+        threads=[_thread("working", 100)],
+        turns={"working": {"id": "turn", "status": "inProgress"}},
+    )
+    monkeypatch.setattr(module, "CodexAppServer", lambda *_a, **_k: server)
+    await service.observe_work()
+    assert (await service.tracker.visible())[0].turn_id == "turn"
+    server._turns.clear()
+    await service.observe_work()
+    rows = await service.tracker.visible()
+    assert len(rows) == 1 and rows[0].thread_id == "working"
+    assert rows[0].turn_status == "inProgress" and not rows[0].verified
+    server._turns["working"] = {"id": "turn", "status": "completed"}
+    service._scan.entries.clear()
+    await service.observe_work()
+    assert not await service.tracker.visible()
 
 
 async def _unknown_goal():

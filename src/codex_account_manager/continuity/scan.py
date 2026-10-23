@@ -13,7 +13,7 @@ ACTIVE_THREAD_STATES = frozenset({"active", "inProgress", "awaitingUser", "pause
 
 def thread_revision(thread: ThreadInfo) -> tuple:
     stamp = None
-    if thread.path:
+    if thread.path and thread.history_mode != "paginated":
         try:
             path = resolved_path(thread.path)
             from codex_account_manager.core.paths import paths

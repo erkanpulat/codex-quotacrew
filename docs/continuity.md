@@ -10,6 +10,10 @@ An explicitly rejected sign-in can also trigger recovery to a verified available
 
 Before restarting Desktop, QuotaCrew validates the destination session. An invalidated session requires signing in again. Account operations are serialized, credential writes are atomic, and an interrupted switch retains a recovery snapshot. Failed activation restores the previous account when possible.
 
+A confirmed manual switch stops QuotaCrew's continuation queue and interrupts any turn owned by that queue before changing credentials. It waits for connection cleanup and the account lock; clearing tracking is not required. Conversations and goal checkpoints are preserved.
+
+Immediately before that restart, eligible Desktop goals are captured only after verifying their current goal, budget and live activity. After the switch, QuotaCrew opens each unchanged interrupted goal once without a message, or observes it if Desktop already resumed it. This also supports resuming the same turn identity. Full conversation history is not required. Ordinary running conversations are not sent a replacement prompt merely because of a manual switch. Desktop observations are invalidated after the restart, so an old running badge does not prove resumption.
+
 A successful account switch does not by itself prove that a conversation resumed or that an IDE reloaded its cached account.
 
 ## Automatic continuation
@@ -19,14 +23,18 @@ With monitoring and the relevant continuation option enabled:
 1. Observe running work and a subsequent verified quota interruption.
 2. Check the destination account and ensure other work or approvals do not block the handoff.
 3. Switch accounts and reconnect to the original conversation.
-4. Recheck its turn, goal and connection. For eligible Desktop goals, open the conversation once so Codex can resume its goal. For other supported work, send one continuation request.
+4. Recheck its turn, goal and connection. For eligible Desktop goals, verify Desktop readiness and open the conversation so Codex can resume its goal. For other supported work, send one continuation request.
 5. Record the observed result in Jobs.
 
 Goal opening sends no message. If a new turn is already running, QuotaCrew observes it without another action. A goal whose quota interruption is verified may be reactivated, preserving its budget. User-paused, blocked or completed goals are not automatically restarted; approval requests remain with the user. Other continuation requests are model input and can consume quota.
 
-After opening a goal, QuotaCrew waits briefly for a new turn. If none can be verified, Jobs explains that goal resumption is unconfirmed. It does not repeatedly open the conversation, send a fallback prompt or restart Desktop. A successful account switch remains committed even if an individual continuation fails.
+After opening a goal, an independent observer checks lightweight Desktop activity for up to 60 seconds. It releases the account lock between checks and does not hold up other conversations. After at least ten seconds it may open the conversation one more time, only after rechecking the same account, available capacity, unchanged eligible goal and quota turn, and idle Desktop state. The deadline and second-opening claim survive application restarts. No resumed work after that window requires a manual check; the conversation is not opened indefinitely. Manual switching or stopping continuation cancels these observers. Conditional shutdown waits while goal activation is pending.
+
+Manually handed off active goals receive only one opening followed by the same bounded observation. A second opening could override a user stop when the turn identity stays unchanged, so it is disabled for these intents. A successful account switch remains committed even if an individual continuation fails; QuotaCrew does not send a fallback prompt or restart Desktop because of that failure.
 
 Unsent requests can wait for a connection for up to ten minutes. An uncertain submission is not resent automatically. Pausing or clearing tracking cancels waiting requests; account information continues refreshing. Historical failures found on the first observation are not automatically revived.
+
+If a previous history-size restriction no longer applies, successful revalidation releases that unsent restriction. Submitted or uncertain requests remain protected against duplicate delivery.
 
 ## Desktop and IDE support
 
@@ -42,9 +50,11 @@ The extension's cached account cannot be independently verified by QuotaCrew. If
 
 Jobs counts verified running work. Completed conversations are retired after a successful observation, including after account changes. Unknown status is not proof of running or finished work. Very short tasks may occur between checks.
 
-Checks prioritize tracked and active conversations, compare metadata and local file revisions, and inspect older conversations in bounded batches. Unavailable conversations have independent retry delays. Lightweight turn metadata is corroborated with a bounded local activity read; observation does not scan entire conversation files.
+Checks prioritize tracked and active conversations, compare metadata and validated local file revisions, and inspect older conversations in bounded batches. Unavailable conversations have independent retry delays. Paginated histories use bounded turn metadata from Codex; legacy histories also use a bounded local activity read. An obsolete rollout file is not used to cache a paginated history. Observation does not scan entire conversation files. If goal information cannot be read, the previous observation is kept as unverified rather than replaced with an absent goal.
 
-Native Desktop reads may load conversation history. QuotaCrew stops those reads and automatic message delivery when a verified local history exceeds 256 MiB. Goal activation is separate: verified lightweight state permits opening the conversation once without sending a message, regardless of history size. If lightweight verification fails, oversized histories remain isolated. Opening can still cause Codex itself to load history; the threshold is not a guarantee about Codex's memory use. History is never deleted or modified.
+A stored interrupted turn is confirmed against the running Desktop because a separate App Server can report an active turn as interrupted. If that live check fails, the state remains unknown. A previously observed job is also kept as unverified if its turn disappears. An empty response alone does not prove that known work finished.
+
+Native Desktop reads may load conversation history. For legacy histories, QuotaCrew stops those reads and automatic message delivery when a verified local history exceeds 256 MiB. Paginated histories do not depend on the size or existence of an obsolete rollout file. Goal activation is separate: verified lightweight state permits opening the conversation once without sending a message, regardless of history size. If lightweight verification fails, oversized legacy histories remain isolated. Opening can still cause Codex itself to load history; these checks are not a guarantee about Codex's memory use. History is never deleted or modified.
 
 Private Desktop channels can change between Codex versions. Transport parsing is kept in the adapter; unsupported responses stop that action. Conversation failures do not initiate a Desktop restart. Account activation can still require one restart, and a failed activation may require rollback.
 
@@ -63,5 +73,7 @@ Plans require confirmation, apply only to the current application session and ca
 - **Timer:** choose 1–1440 minutes. The final two-minute warning is included in that duration; a one-minute timer warns immediately. This mode does not wait for work to finish.
 
 Work and limit modes also wait for other observed Codex work to stop before a two-minute countdown. Checks run every 60 seconds while waiting, every 15 seconds during countdown and immediately before shutdown. Missing evidence resets the countdown.
+
+Internal Codex guardian records are excluded from work checks; real child jobs are checked. A verified empty history is distinct from an unreadable one. Waiting messages identify examples of running or unreadable jobs. New work, uncertain work observations or newly available account capacity reset the applicable conditional countdown; they do not change a timer plan.
 
 Pausing monitoring cancels conditional plans; quitting cancels every plan. QuotaCrew does not force-close applications. Windows can delay shutdown for unsaved work; activity in unrelated programs is not monitored.

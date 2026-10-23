@@ -16,6 +16,7 @@ from codex_account_manager.adapters.native_desktop import NativeDesktop, verifie
 from codex_account_manager.codex.status import normalize_turn_status
 from codex_account_manager.continuity.scan import thread_revision
 from codex_account_manager.continuity.tracking import WorkTracker, goal_signature
+from codex_account_manager.core.errors import OwnerNotFoundError
 from codex_account_manager.core.paths import paths
 from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.domain.states import QuotaState
@@ -153,6 +154,7 @@ class PowerChecks:
         self.accounts = accounts
         self._idle: dict[str, tuple] = {}
         self._last_attempt: dict[str, float] = {}
+        self._seen_turns: set[str] = set()
 
     @staticmethod
     def _may_be_running(status: str | None) -> bool:
@@ -165,22 +167,29 @@ class PowerChecks:
         try:
             async with asyncio.timeout(15):
                 await adapter.start()
-                threads = await adapter.list_threads(max_items=1000)
-                from codex_account_manager.adapters.credential_store import FileCredentialStore
+                threads = await adapter.list_threads(include_subagents=False)
+                choices: dict[str, str] = {}
+                pending = iter(threads)
 
-                account_id = FileCredentialStore().active_account_hint()
-                tracked = {
-                    work.thread_id
-                    for work in (
-                        await WorkTracker().visible(account_id, verified_only=True)
-                        if account_id
-                        else []
-                    )
-                }
+                async def worker() -> None:
+                    for thread in pending:
+                        try:
+                            async with asyncio.timeout(3):
+                                turn = await self._turn(adapter, thread.id)
+                            if (
+                                turn
+                                and not turn.get("blocked")
+                                and normalize_turn_status(turn.get("status")) == "inProgress"
+                            ):
+                                choices[thread.id] = thread.title or thread.id[:12]
+                        except Exception:
+                            continue
+
+                async with asyncio.TaskGroup() as group:
+                    for _ in range(min(4, len(threads))):
+                        group.create_task(worker())
                 return [
-                    (thread.id, thread.title or thread.id[:12])
-                    for thread in threads
-                    if thread.id in tracked or self._may_be_running(thread.status)
+                    (thread.id, choices[thread.id]) for thread in threads if thread.id in choices
                 ]
         finally:
             await adapter.aclose()
@@ -189,19 +198,24 @@ class PowerChecks:
         source = await adapter.thread_source(thread_id)
         if source == "vscode":
             from codex_account_manager.adapters.native_ide import NativeIDE
-            from codex_account_manager.storage.repositories import SettingsRepository
 
-            if await SettingsRepository().get(
-                "ide_continue", "false"
-            ) == "true" and not await adapter.is_desktop_thread(thread_id):
-                state = await NativeIDE().inspect(thread_id)
-                return {**state.turn, "blocked": state.blocked}
-            return await verified_desktop_turn(
-                NativeDesktop(), adapter, thread_id, prefer_stored=True
-            )
-        if source in {"cli", "exec", "appServer"}:
-            return await adapter.observed_turn(thread_id)
-        return None
+            if not await adapter.is_desktop_thread(thread_id):
+                try:
+                    state = await NativeIDE().inspect(thread_id)
+                    return {**state.turn, "blocked": state.blocked}
+                except OwnerNotFoundError:
+                    turn = await adapter.verified_stored_turn(thread_id)
+            else:
+                turn = await verified_desktop_turn(
+                    NativeDesktop(), adapter, thread_id, prefer_stored=True
+                )
+        elif source in {"cli", "exec", "appServer"}:
+            turn = await adapter.observed_turn(thread_id)
+        elif source.startswith("subAgent") and source != "subAgentGuardian":
+            turn = await adapter.verified_stored_turn(thread_id)
+        else:
+            return None
+        return turn if turn is not None else {"id": None, "status": "notStarted"}
 
     async def work_target(self, thread_id: str) -> PowerTarget:
         adapter = CodexAppServer(paths.shared_codex_home, experimental=True)
@@ -244,18 +258,23 @@ class PowerChecks:
                 listed = {thread.id: thread for thread in threads}
                 self._idle = {key: value for key, value in self._idle.items() if key in listed}
                 tracked = {work.thread_id for work in await WorkTracker().visible()}
-                ids = tracked | {t.id for t in threads if self._may_be_running(t.status)}
+                internal = {t.id for t in threads if t.source == "subAgentGuardian"}
+                ids = (
+                    tracked | {t.id for t in threads if self._may_be_running(t.status)}
+                ) - internal
                 if target.thread_id:
                     ids.add(target.thread_id)
+                self._seen_turns.intersection_update(ids)
+                self._seen_turns.update(tracked & ids)
                 self._last_attempt = {
                     key: value for key, value in self._last_attempt.items() if key in ids
                 }
                 selected_turn = None
-                running = 0
-                unavailable = 0
+                running: set[str] = set()
+                unavailable: set[str] = set()
 
                 async def inspect(thread_id: str) -> None:
-                    nonlocal selected_turn, running, unavailable
+                    nonlocal selected_turn
                     thread = listed.get(thread_id)
                     revision = thread_revision(thread) if thread else None
                     if (
@@ -271,29 +290,41 @@ class PowerChecks:
                         async with asyncio.timeout(3):
                             turn = await self._turn(adapter, thread_id)
                             if not turn or turn.get("blocked"):
-                                unavailable += 1
+                                unavailable.add(thread_id)
                                 return
                             status = normalize_turn_status(turn.get("status"))
                             if status == "inProgress":
-                                running += 1
+                                self._seen_turns.add(thread_id)
+                                running.add(thread_id)
                                 return
-                            if status not in {"completed", "failed", "interrupted"}:
-                                unavailable += 1
+                            if status == "notStarted" and thread_id in self._seen_turns:
+                                unavailable.add(thread_id)
                                 return
+                            if status not in {"completed", "failed", "interrupted", "notStarted"}:
+                                unavailable.add(thread_id)
+                                return
+                            if status != "notStarted":
+                                self._seen_turns.add(thread_id)
                             if target.mode == "work" and thread_id != target.thread_id:
                                 goal = await adapter.get_goal(thread_id)
                                 if goal is None:
-                                    unavailable += 1
+                                    unavailable.add(thread_id)
                                     return
                                 if goal.present and goal.status == "active":
-                                    running += 1
+                                    running.add(thread_id)
                                     return
                             if thread_id == target.thread_id:
                                 selected_turn = turn
                             elif revision is not None:
                                 self._idle[thread_id] = revision
                     except Exception:
-                        unavailable += 1
+                        unavailable.add(thread_id)
+
+                def job_names(job_ids: set[str]) -> str:
+                    return ", ".join(
+                        (listed[tid].title or tid[:12])[:100] if tid in listed else tid[:12]
+                        for tid in sorted(job_ids)[:3]
+                    )
 
                 pending_ids = iter(sorted(ids, key=lambda key: self._last_attempt.get(key, 0)))
 
@@ -308,18 +339,38 @@ class PowerChecks:
                 if running:
                     return PowerEvidence(
                         False,
-                        "Waiting for {count} running conversations to stop.",
-                        values={"count": running},
+                        "Waiting for {count} running jobs or active goals. Examples: {jobs}.",
+                        values={"count": len(running), "jobs": job_names(running)},
                     )
                 if unavailable:
                     return PowerEvidence(
                         False,
-                        "Could not read {count} conversations. Keep Codex open; checking again automatically.",
-                        values={"count": unavailable},
+                        "Could not verify {count} jobs. Examples: {jobs}. Shutdown is waiting; check these jobs in Codex.",
+                        values={"count": len(unavailable), "jobs": job_names(unavailable)},
+                    )
+                from codex_account_manager.continuity.desktop_goal import OBSERVATION_SECONDS
+                from codex_account_manager.storage.database import connect
+
+                now = time.time()
+                async with connect() as db:
+                    activating = await (
+                        await db.execute(
+                            """SELECT COUNT(*) FROM pending_continuations AS pending
+                            JOIN continuation_attempts AS attempt
+                              ON attempt.thread_id=pending.thread_id
+                             AND attempt.source_turn_id=pending.turn_id
+                            WHERE pending.created_at BETWEEN ? AND ?
+                              AND attempt.status IN ('goal_opened','goal_reopened')""",
+                            (now - OBSERVATION_SECONDS, now),
+                        )
+                    ).fetchone()
+                if activating and activating[0]:
+                    return PowerEvidence(
+                        False,
+                        "Waiting for {count} goals to resume.",
+                        values={"count": activating[0]},
                     )
                 if target.mode == "work":
-                    from codex_account_manager.storage.database import connect
-
                     account_id = (await adapter.read_account()).account_id
                     now = time.time()
                     async with connect() as db:
@@ -343,18 +394,33 @@ class PowerChecks:
                         )
                     goal = await adapter.get_goal(target.thread_id or "")
                     if not work_finished(target, selected_turn, goal):
-                        if (
-                            goal is not None
-                            and goal.present
-                            and goal.status in {"active", "usageLimited"}
-                        ):
+                        if goal is None or goal.thread_id != target.thread_id:
                             return PowerEvidence(
                                 False,
-                                "The conversation stopped, but its goal is not complete. Waiting for the goal to finish.",
+                                "The selected goal could not be verified. Shutdown is waiting for a fresh check.",
                             )
+                        if target.goal_signature is not None and not goal.present:
+                            return PowerEvidence(
+                                False,
+                                "The selected goal is no longer present. Cancel this plan and select the work again.",
+                            )
+                        if goal.present:
+                            if goal_signature(goal) != target.goal_signature:
+                                return PowerEvidence(
+                                    False,
+                                    "The selected goal changed. Cancel this plan and select the work again.",
+                                )
+                            reasons = {
+                                "blocked": "The selected goal is blocked. Open the conversation in Codex to review what it needs.",
+                                "paused": "The selected goal is paused. Shutdown will wait for it to complete.",
+                                "usageLimited": "The selected goal reached its usage limit. Shutdown will wait for it to resume and complete.",
+                                "active": "The selected goal is still active. Shutdown will wait for it to complete.",
+                            }
+                            if goal.status in reasons:
+                                return PowerEvidence(False, reasons[goal.status])
                         return PowerEvidence(
                             False,
-                            "The selected work has not completed. Errors and user pauses do not count as completion.",
+                            "The selected turn has not completed successfully. Shutdown is waiting.",
                         )
                     return PowerEvidence(True, "Selected work completed.", target.thread_id or "")
                 health = await self.accounts.all_health()
@@ -366,7 +432,7 @@ class PowerChecks:
                     if available:
                         return PowerEvidence(
                             False,
-                            "{count} accounts still have capacity. Shutdown will wait.",
+                            "{count} accounts still have capacity. Shutdown requires exhausted five-hour quotas and no running work.",
                             values={"count": available},
                         )
                     return PowerEvidence(

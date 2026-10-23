@@ -453,6 +453,15 @@ class PowerControls(QFrame):
         self.status_changed.emit(tr("Shutdown is off."), False)
         self._update_summary()
 
+    def invalidate(self) -> None:
+        if self.plan.target is None or self.plan.target.mode == "timer":
+            return
+        self.plan.generation += 1
+        self.plan.observe(
+            PowerEvidence(False, "Work is active or could not be verified."), time.monotonic()
+        )
+        self._next_check = 0.0
+
     def _tick(self) -> None:
         target = self.plan.target
         if target is None:
@@ -493,6 +502,8 @@ class PowerControls(QFrame):
         def checked(evidence: PowerEvidence):
             self._busy = False
             if generation != self.plan.generation or self.plan.target is None:
+                if self.plan.target is not None:
+                    self._tick()
                 return
             before = self.plan.deadline
             self.plan.observe(evidence, time.monotonic())

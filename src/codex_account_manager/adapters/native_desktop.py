@@ -1,8 +1,8 @@
 """Bounded, local-only access to the running Desktop's native tool channel.
 
 The channel is private and version-dependent. Failure never falls back to a
-separate conversation writer. Only read_thread and send_message_to_thread are
-exposed; model, approval and sandbox settings are never overridden.
+separate conversation writer. Only read_thread, list_threads and
+send_message_to_thread are used; model, approval and sandbox settings are never overridden.
 
 Security constraints:
 - The pipe server process path must match the expected Codex Desktop MSIX
@@ -190,9 +190,6 @@ class NativeDesktop:
         self._exchange_lock = asyncio.Lock()
 
     async def call(self, thread_id: str, source_turn_id: str, *, send: bool = False) -> dict:
-        if not IDENTIFIER.fullmatch(thread_id) or not IDENTIFIER.fullmatch(source_turn_id):
-            raise AppServerError("Invalid native conversation identity.")
-        request_id = str(uuid4())
         arguments = (
             {"threadId": thread_id, "prompt": CONTINUE_PROMPT}
             if send
@@ -203,6 +200,17 @@ class NativeDesktop:
                 "maxOutputCharsPerItem": 1,
             }
         )
+        return await self._call(
+            thread_id,
+            source_turn_id,
+            "send_message_to_thread" if send else "read_thread",
+            arguments,
+        )
+
+    async def _call(self, thread_id: str, source_turn_id: str, tool: str, arguments: dict) -> dict:
+        if not IDENTIFIER.fullmatch(thread_id) or not IDENTIFIER.fullmatch(source_turn_id):
+            raise AppServerError("Invalid native conversation identity.")
+        request_id = str(uuid4())
         payload = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -214,14 +222,19 @@ class NativeDesktop:
                 "callId": request_id,
                 "namespace": "codex_app",
                 "threadId": thread_id,
-                "tool": "send_message_to_thread" if send else "read_thread",
+                "tool": tool,
                 "turnId": source_turn_id,
             },
         }
         cancelled = threading.Event()
         async with self._exchange_lock:
             exchange_task = asyncio.create_task(
-                asyncio.to_thread(_exchange, payload, cancelled, 60.0 if send else 15.0)
+                asyncio.to_thread(
+                    _exchange,
+                    payload,
+                    cancelled,
+                    60.0 if tool == "send_message_to_thread" else 15.0,
+                )
             )
             try:
                 result = await asyncio.shield(exchange_task)
@@ -235,6 +248,30 @@ class NativeDesktop:
                 raise
             finally:
                 cancelled.set()
+
+    async def thread_status(self, thread_id: str) -> str:
+        """Read Desktop readiness and activity without loading conversation history."""
+        data = await self._call(
+            thread_id, "account-manager-observation", "list_threads", {"limit": 50}
+        )
+        if data.get("schemaVersion") != 4 or not all(
+            isinstance(data.get(key), list) for key in ("threads", "pinnedThreads")
+        ):
+            raise AppServerError("Desktop conversation list schema is unsupported.")
+        matches = [
+            item
+            for item in [*data["pinnedThreads"], *data["threads"]]
+            if isinstance(item, dict) and item.get("id") == thread_id
+        ]
+        if not matches or any(
+            item.get("kind") != "codex"
+            or item.get("hostId") != "local"
+            or item.get("status") not in {"active", "idle", "notLoaded"}
+            or item.get("status") != matches[0].get("status")
+            for item in matches
+        ):
+            raise ConnectionNotReadyError("Desktop conversation activity could not be verified.")
+        return matches[0]["status"]
 
     async def latest_turn(self, thread_id: str) -> dict:
         for attempt in range(3):
@@ -288,11 +325,12 @@ async def verified_desktop_turn(
     *,
     wait: bool = False,
     prefer_stored: bool = False,
-) -> dict:
+) -> dict | None:
     if prefer_stored:
         try:
             stored = await adapter.verified_stored_turn(thread_id)
-            if stored:
+            # A separate App Server can label another process's live turn interrupted.
+            if stored is None or normalize_turn_status(stored.get("status")) != "interrupted":
                 return stored
         except (AppServerError, OSError):
             pass

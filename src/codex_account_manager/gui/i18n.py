@@ -183,13 +183,10 @@ TR = {
     "Updates for this installation are managed by Microsoft Store.": "Bu kurulumun güncellemeleri Microsoft Store tarafından yönetilir.",
     "Manage automatic updates in Microsoft Store settings.": "Otomatik güncellemeleri Microsoft Store ayarlarından yönetin.",
     "Privacy policy": "Gizlilik politikası",
-    "When should the computer shut down?": "Bilgisayar ne zaman kapansın?",
-    "Choose one condition. The plan stays active only while QuotaCrew is running.": "Bir kapatma koşulu seçin. Plan yalnızca QuotaCrew açıkken geçerlidir.",
     "When my selected work finishes": "Seçtiğim iş tamamlandığında",
     "When all accounts reach their limits": "Tüm hesapların limitleri dolduğunda",
     "After a set time": "Belirlediğim süre sonunda",
     "Shut down after (minutes)": "Kapanma süresi (dakika)",
-    "Plan shutdown": "Kapatmayı planla",
     "You can cancel from this page or the tray. Open applications are not forcibly closed.": "Bu sayfadan veya tepsi menüsünden iptal edebilirsiniz. Açık uygulamalar zorla kapatılmaz.",
     "Select a running conversation. Once it completes and no other Codex work is active, a 2-minute countdown starts. Errors and requests for input do not count as completion.": "Çalışan bir sohbet seçin. İşin tamamlandığı ve başka bir Codex işinin çalışmadığı doğrulanınca 2 dakikalık geri sayım başlar. Hata veya yanıt bekleme durumu tamamlanma sayılmaz.",
     "Once every saved account is verified out of available usage and no Codex work is active, a 2-minute countdown starts.": "Tüm kayıtlı hesaplarda kullanılabilir limit kalmadığı ve hiçbir Codex işinin çalışmadığı doğrulanınca 2 dakikalık geri sayım başlar.",
@@ -199,14 +196,12 @@ TR = {
     "Verifying selected work…": "Seçilen iş doğrulanıyor…",
     "Shut down in {minutes} minutes from now, even if Codex work is still running? Save work in other applications.": "Codex işleri sürse bile bilgisayar şu andan itibaren {minutes} dakika sonra kapatılsın mı? Diğer uygulamalardaki çalışmalarınızı kaydedin.",
     "Timed shutdown in {time}. Codex work will not delay it.": "Bilgisayar {time} sonra kapanacak. Codex işleri bu süreyi uzatmaz.",
-    "Finish your work, use your remaining limits or choose a shutdown time.": "İş tamamlandığında, limitler dolduğunda veya belirlediğiniz süre sonunda bilgisayarı kapatın.",
     "Support the project": "Projeye destek olun",
     "Star on GitHub": "GitHub'da yıldız ver",
     "Report an issue": "Sorun bildir",
     "Contribute a pull request": "Pull request ile katkıda bulun",
     "Developer profile": "Geliştiricinin profili",
     "Welcome to QuotaCrew": "QuotaCrew uygulamasına hoş geldiniz",
-    "Let's check the connection tools before choosing your preferences.": "Tercihlerinizi seçmeden önce bağlantı araçlarını kontrol edelim.",
     "Connection tools": "Bağlantı araçları",
     "Choose how the app works. Nothing starts until you save these preferences. You can change them later in Settings.": "Uygulamanın nasıl çalışacağını seçin. Tercihleri kaydedene kadar izleme başlamaz. Bunları daha sonra Ayarlar'dan değiştirebilirsiniz.",
     "Check account usage every 60 seconds.": "Hesap kullanımını her 60 saniyede kontrol et.",
@@ -328,7 +323,6 @@ TR = {
     "Observing the submitted continuation": "Gönderilen devam isteğinin sonucunu izleme",
     "Continuation result: {state}. Stage: {stage}.": "Devam sonucu: {state}. Aşama: {stage}.",
     "Shutdown condition": "Kapatma koşulu",
-    "A fresh check must confirm the condition before the countdown begins.": "Geri sayım başlamadan önce koşul güncel kontrolle doğrulanır.",
     "Paused": "Duraklatıldı",
     "Add an account to open Codex sign-in automatically. Use each row's actions to manage saved accounts.": "Hesap eklediğinizde Codex girişi otomatik açılır. Kayıtlı hesapları satır menüsünden yönetin.",
     "Clear tracking": "Takibi temizle",
@@ -469,7 +463,6 @@ TR = {
     "Off by default and only active for this session. When the condition is verified, a visible countdown starts. You can cancel it at any time; open applications are not forcibly closed.": "Varsayılan olarak kapalıdır ve yalnızca bu oturumda geçerlidir. Koşul doğrulandığında görünür bir geri sayım başlar. İstediğiniz zaman iptal edebilirsiniz; açık uygulamalar zorla kapatılmaz.",
     "Shutdown countdown (minutes)": "Kapatma geri sayımı (dakika)",
     "Shutdown plan": "Kapatma planı",
-    "Choose when to shut down and how long the cancellation countdown lasts.": "Kapatma koşulunu ve iptal edilebilir geri sayımın süresini seçin.",
     "Shutdown is off.": "Otomatik kapatma kapalı.",
     "When all accounts are limited": "Tüm hesapların limiti dolunca",
     "Cancel shutdown": "Kapatmayı iptal et",
@@ -485,25 +478,36 @@ TR = {
     "Waiting for the selected condition.": "Seçilen koşulun gerçekleşmesi bekleniyor.",
     "Waiting for a fresh check.": "Kontrol tamamlanamadı. Kapatma duraklatıldı; bağlantı yeniden kontrol edilecek.",
     "Conversation discovery is incomplete. Shutdown will wait.": "Konuşma listesi tamamlanamadı. Çalışan işleri kaçırmamak için kapatma bekliyor.",
-    "Waiting for {count} running conversations to stop.": "{count} konuşma hâlâ çalışıyor. İşler durunca kapatma koşulu yeniden değerlendirilecek.",
-    "Could not read {count} conversations. Keep Codex open; checking again automatically.": "{count} konuşmanın durumu okunamadı. Codex'i açık bırakın; otomatik olarak yeniden kontrol edilecek.",
-    "The conversation stopped, but its goal is not complete. Waiting for the goal to finish.": "Konuşma durdu ancak hedefi tamamlanmadı. Kapatma için hedefin tamamlanması bekleniyor.",
-    "The selected work has not completed. Errors and user pauses do not count as completion.": "Seçili iş tamamlanmadı. Hata nedeniyle duran veya sizin duraklattığınız iş tamamlanmış sayılmaz.",
-    "{count} accounts still have capacity. Shutdown will wait.": "{count} hesapta kullanılabilir kota var. Kapatma, tüm 5 saatlik kotalar dolduğunda başlayacak.",
+    "Waiting for {count} running jobs or active goals. Examples: {jobs}.": "Çalışan {count} iş veya etkin hedef nedeniyle kapatma bekliyor. Örnekler: {jobs}.",
+    "Could not verify {count} jobs. Examples: {jobs}. Shutdown is waiting; check these jobs in Codex.": "{count} işin durumu doğrulanamadı. Örnekler: {jobs}. Kapatma bekliyor; bu işleri Codex'te kontrol edin.",
+    "{count} accounts still have capacity. Shutdown requires exhausted five-hour quotas and no running work.": "{count} hesapta kullanılabilir kota var. Geri sayım için tüm 5 saatlik kotaların dolması ve çalışan iş kalmadığının doğrulanması gerekiyor.",
     "Not all five-hour quotas are confirmed exhausted. Check Accounts for missing or expired sign-ins.": "Tüm 5 saatlik kotaların dolduğu doğrulanamadı. Hesaplarım bölümünde eksik bilgi veya yeniden giriş uyarısı olup olmadığını kontrol edin.",
+    "The selected goal is blocked. Open the conversation in Codex to review what it needs.": "Seçili hedef engellendiği için kapatma bekliyor. Gereken işlemi görmek için sohbeti Codex’te açın.",
+    "The selected goal is paused. Shutdown will wait for it to complete.": "Seçili hedef duraklatılmış. Kapatma için hedefin tamamlanması bekleniyor.",
+    "The selected goal reached its usage limit. Shutdown will wait for it to resume and complete.": "Seçili hedef kullanım sınırına ulaştı. Kapatma için hedefin devam edip tamamlanması bekleniyor.",
+    "The selected goal is still active. Shutdown will wait for it to complete.": "Seçili hedef hâlâ etkin. Kapatma için hedefin tamamlanması bekleniyor.",
+    "The selected goal changed. Cancel this plan and select the work again.": "Seçili hedef değişti. Kapatma planını iptal edip işi yeniden seçin.",
+    "The selected goal is no longer present. Cancel this plan and select the work again.": "Seçili hedef artık mevcut değil. Kapatma planını iptal edip işi yeniden seçin.",
+    "The selected goal could not be verified. Shutdown is waiting for a fresh check.": "Seçili hedefin durumu doğrulanamadı. Kapatma yeni kontrolü bekliyor.",
+    "The selected turn has not completed successfully. Shutdown is waiting.": "Seçili konuşmanın son turu başarıyla tamamlanmadı. Kapatma bekliyor.",
     "Automatic continuation stopped": "Otomatik devam durduruldu",
     "Waiting for goal to resume": "Hedefin devam etmesi bekleniyor",
     "Waiting for {count} queued continuations.": "Sıradaki {count} otomatik devam işlemi bekleniyor. Kapatma henüz başlamadı.",
     "Opening conversation for its goal": "Hedefi devam ettirmek için sohbeti açma",
     "Conversation opened; waiting for goal": "Sohbet açıldı; hedef bekleniyor",
-    "The conversation was opened once to resume its goal. No message was sent. A new turn has not been verified; other jobs and account switching continue. Check the goal in Codex.": "Hedefi devam ettirmek için sohbet bir kez açıldı. Mesaj gönderilmedi. Yeni bir tur başladığı henüz doğrulanmadı; diğer işler ve hesap geçişleri devam eder. Hedefi Codex'te kontrol edin.",
+    "The conversation was opened without a message. Its goal is being checked for up to 60 seconds. Other jobs and account switching continue.": "Sohbet mesaj gönderilmeden açıldı. Hedefin başlaması en fazla 60 saniye izleniyor. Diğer işler ve hesap geçişleri devam eder.",
+    "Goal resumption unconfirmed": "Hedefin devam ettiği doğrulanamadı",
+    "The goal could not be confirmed after opening. No automatic openings remain for this attempt. Open the conversation in Codex to check it; other jobs and account switching continue.": "Sohbet açıldıktan sonra hedefin devam ettiği doğrulanamadı. Bu deneme için başka otomatik açma yapılmayacak. Sohbeti Codex'te açıp kontrol edin; diğer işler ve hesap geçişleri devam eder.",
+    "Goal activation stopped": "Hedef açma durduruldu",
+    "Goal activation stopped because the account, goal or monitoring state changed. No message was sent.": "Hesap, hedef veya izleme durumu değiştiği için hedef açma durduruldu. Mesaj gönderilmedi.",
+    "Waiting for {count} goals to resume.": "{count} hedefin devam etmesi kontrol ediliyor. Kapatma bekliyor.",
+    "The conversation was opened without a message; checking whether its goal resumes.": "Sohbet mesaj gönderilmeden açıldı; hedefin başlaması kontrol ediliyor.",
+    "The conversation was opened once more; checking whether its goal resumes.": "Sohbet bir kez daha açıldı; hedefin başlaması kontrol ediliyor.",
+    "Conversation reopened; waiting for goal": "Sohbet yeniden açıldı; hedefin başlaması bekleniyor",
     "Desktop conversation schema is not supported by this version of QuotaCrew.": "Codex'in sohbet bağlantı biçimi bu QuotaCrew sürümünde desteklenmiyor. Otomatik devam durduruldu; QuotaCrew güncellemelerini kontrol edin.",
     "Conversation history is too large for automatic continuation": "Konuşma geçmişi otomatik devam için çok büyük",
     "This conversation exceeds the automatic history limit. No message was sent. Other jobs and account switching continue. Open it manually in Codex or start a new conversation with a summary.": "Bu konuşmanın geçmişi otomatik devam sınırını aşıyor. Mesaj gönderilmedi; diğer işler ve hesap geçişi devam eder. Codex'te elle açabilir veya özetle yeni bir konuşmaya geçebilirsiniz.",
-    "Too many conversations to verify safely.": "Güvenli doğrulama sınırından fazla konuşma var; kapatma bekliyor.",
     "Work is active or could not be verified.": "Çalışan bir iş var veya iş durumu doğrulanamadı.",
-    "The selected work has not completed.": "Seçilen iş henüz tamamlanmadı.",
-    "Accounts have capacity or need verification.": "Kullanılabilir hesap var veya hesap durumu doğrulanamadı.",
     "Windows did not accept shutdown. The plan was cancelled.": "Windows kapatma isteğini kabul etmedi. Plan iptal edildi.",
     "Shutdown requested. Windows may ask you to save open applications.": "Kapatma istendi. Windows açık uygulamaları kaydetmenizi isteyebilir.",
     "Background monitoring": "Otomatik izleme",
@@ -627,7 +631,6 @@ TR = {
     "How tracking works": "Takip nasıl çalışır?",
     "{shown} of {total} local conversations": "{total} yerel konuşmadan {shown} tanesi gösteriliyor",
     "Account": "Hesap",
-    "The app tracks running conversations while it is open. Only a verified limit on the same turn can trigger continuation.": "Uygulama açıkken çalışan konuşmaları izler. Yalnızca aynı turun doğrulanmış kullanım limitiyle kesilmesi otomatik devam başlatabilir.",
     "Tracked work could not be loaded. Refresh to try again.": "Takip edilen işler yüklenemedi. Yeniden denemek için sayfayı yenileyin.",
     "No work is being tracked yet.": "Henüz takip edilen iş yok.",
     "{count} tracked": "{count} iş izleniyor",
@@ -655,7 +658,6 @@ TR = {
     "Application": "Uygulama",
     "Automation": "Otomasyon",
     "With monitoring and continuation enabled, a verified usage-limit interruption can continue after an account switch. The exact turn and goal are checked again before input is sent. Unknown state, approval requests and user pauses stop automation. Merely opening a conversation or saving a local goal note does not start work.": "İzleme ve otomatik devam açıkken, kullanım limitiyle kesildiği doğrulanan iş hesap geçişinden sonra sürdürülebilir. Mesaj gönderilmeden aynı tur ve hedef yeniden kontrol edilir. Bilinmeyen durum, onay isteği ve kullanıcının duraklatması otomasyonu durdurur. Konuşmayı açmak veya yerel hedef notu kaydetmek iş başlatmaz.",
-    "Account switched. No verified usage-limit interruption was found to continue.": "Hesap değiştirildi. Kullanım limiti nedeniyle kesildiği doğrulanan bir çalışma bulunamadı.",
     "Automatic continuation needs attention. Open the conversation in Codex; approval, input or an error may require your action.": "Otomatik devam için müdahaleniz gerekiyor. Konuşmayı Codex üzerinden açın; onay, yanıt veya hata kontrolü gerekebilir.",
     "Automatic continuation stopped. Your pauses and goal limits are preserved.": "Otomatik devam durdu. Duraklatmalarınız ve hedef sınırlarınız korunuyor.",
     "Automatic continuation finished. Review the result in Codex.": "Otomatik devam tamamlandı. Sonucu Codex üzerinden inceleyin.",
@@ -842,7 +844,6 @@ TR = {
     "This conversation has no Codex goal.": "Bu konuşmada Codex hedefi yok.",
     "Refresh Conversations first, then select a conversation to save a local note.": "Önce Konuşmalar listesini yenileyin, ardından yerel not kaydetmek için bir konuşma seçin.",
     "Local note only. This does not start or update a Codex goal:": "Yalnızca yerel nottur. Codex hedefi başlatmaz veya güncellemez:",
-    "Account switched. No previously observed running conversation could be verified for continuation.": "Hesap değişti. Önceden çalıştığı gözlenen bir konuşmanın devamı doğrulanamadı.",
     "Stopped at: {stage}": "Durduğu aşama: {stage}",
     "Codex connection": "Codex bağlantısı",
     "Active account verification": "Etkin hesabın doğrulanması",
@@ -911,9 +912,17 @@ def state_label(value: str) -> str:
 
 
 def work_status(work: ObservedWork) -> tuple[str, str]:
-    if work.continuation_status == "goal_opened":
+    if work.continuation_status in {"goal_opened", "goal_reopened"} and work.continuation_pending:
         return tr("Waiting for goal to resume"), tr(
-            "The conversation was opened once to resume its goal. No message was sent. A new turn has not been verified; other jobs and account switching continue. Check the goal in Codex."
+            "The conversation was opened without a message. Its goal is being checked for up to 60 seconds. Other jobs and account switching continue."
+        )
+    if work.continuation_status in {"goal_unconfirmed", "goal_opened", "goal_reopened"}:
+        return tr("Goal resumption unconfirmed"), tr(
+            "The goal could not be confirmed after opening. No automatic openings remain for this attempt. Open the conversation in Codex to check it; other jobs and account switching continue."
+        )
+    if work.continuation_status == "goal_stopped":
+        return tr("Goal activation stopped"), tr(
+            "Goal activation stopped because the account, goal or monitoring state changed. No message was sent."
         )
     if work.continuation_status == "history_too_large":
         return (
@@ -1029,6 +1038,7 @@ def continuation_detail(payload: dict) -> str:
         "completed": "Completed",
         "running": "Running",
         "goal_opened": "Conversation opened; waiting for goal",
+        "goal_reopened": "Conversation reopened; waiting for goal",
         "stopped": "Stopped",
         "needs_user": "Needs attention",
         "skipped": "Skipped",
