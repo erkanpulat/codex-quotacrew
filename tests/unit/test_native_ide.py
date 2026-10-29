@@ -16,7 +16,7 @@ from codex_account_manager.continuity.automation import ContinuationSupervisor, 
 from codex_account_manager.continuity.tracking import goal_signature
 from codex_account_manager.core.errors import AppServerError, OwnerNotFoundError
 from codex_account_manager.storage.repositories import SettingsRepository
-from tests.fakes import ExecutionServer
+from tests.fakes import ExecutionServer, account_identity
 
 
 def state_message(**state_changes):
@@ -227,13 +227,23 @@ async def test_ide_refresh_revalidates_new_owner_before_sending(
     supervisor.ide_session.refresh = AsyncMock()
     supervisor.ide.send = AsyncMock()
     await supervisor.run(
-        ContinuationTicket("thread", "last", "acc-1", goal_signature(server.native), True, "before")
+        ContinuationTicket(
+            "thread",
+            "last",
+            "acc-1",
+            goal_signature(server.native),
+            True,
+            "before",
+            owner_key=account_identity("acc-1").fingerprint,
+        )
     )
     if blocked:
         supervisor.ide_session.refresh.assert_not_awaited()
         supervisor.ide.send.assert_not_awaited()
         return
-    supervisor.ide_session.refresh.assert_awaited_once_with("acc-1", "thread", str(tmp_path))
+    supervisor.ide_session.refresh.assert_awaited_once_with(
+        account_identity("acc-1").fingerprint, "thread", str(tmp_path)
+    )
     assert supervisor.ide.send.await_args.args[1].owner_id == "after"
 
 
@@ -245,7 +255,15 @@ async def test_presend_account_lock_contention_retains_unsent_ide_ticket(migrate
 
     await SettingsRepository().set("ide_continue", "true")
     supervisor = ContinuationSupervisor(factory=ExecutionServer)
-    ticket = ContinuationTicket("thread", "last", "acc-1", None, True, "owner")
+    ticket = ContinuationTicket(
+        "thread",
+        "last",
+        "acc-1",
+        None,
+        True,
+        "owner",
+        owner_key=account_identity("acc-1").fingerprint,
+    )
     await supervisor.save_pending([ticket])
     with OperationLock(migrated_db.data_dir / "account-operation.lock"):
         supervisor.launch_batch([ticket])
@@ -272,7 +290,13 @@ async def test_slow_owner_readiness_keeps_unsent_ticket_and_recovers_once(migrat
     server.latest = limited
     supervisor = ContinuationSupervisor(factory=lambda: server)
     ticket = ContinuationTicket(
-        "thread", "last", "acc-1", goal_signature(server.native), True, "owner" if ide else None
+        "thread",
+        "last",
+        "acc-1",
+        goal_signature(server.native),
+        True,
+        "owner" if ide else None,
+        owner_key=account_identity("acc-1").fingerprint,
     )
     await supervisor.save_pending([ticket])
     if ide:
@@ -303,10 +327,10 @@ async def test_slow_owner_readiness_keeps_unsent_ticket_and_recovers_once(migrat
         supervisor.native.wait_latest_turn = AsyncMock(return_value=limited)
         supervisor.native.latest_turn = AsyncMock(side_effect=[limited, running])
         sender = supervisor.native.send
-    await supervisor.recover_pending("acc-1")
+    await supervisor.recover_pending(account_identity("acc-1").fingerprint)
     await asyncio.gather(*tuple(supervisor.tasks))
     sender.assert_awaited_once()
-    await supervisor.recover_pending("acc-1")
+    await supervisor.recover_pending(account_identity("acc-1").fingerprint)
     sender.assert_awaited_once()
     async with connect() as db:
         assert not await (await db.execute("SELECT * FROM pending_continuations")).fetchall()
@@ -378,6 +402,7 @@ async def test_ide_continuation_is_claimed_once_and_tracks_next_turn(migrated_db
         goal_signature(GoalInfo("thread", None, None, False)),
         True,
         "owner",
+        owner_key=account_identity("acc-1").fingerprint,
     )
     await supervisor.run(ticket)
     supervisor.ide.send.assert_awaited_once()
@@ -411,6 +436,7 @@ async def test_ambiguous_ide_delivery_is_not_retried(migrated_db):
         goal_signature(GoalInfo("thread", None, None, False)),
         True,
         "owner",
+        owner_key=account_identity("acc-1").fingerprint,
     )
     await supervisor.run(ticket)
     await supervisor.run(ticket)
@@ -526,6 +552,7 @@ async def test_three_owner_conversations_survive_restart_and_send_once_each(migr
             goal_signature(GoalInfo(tid, None, None, False)),
             True,
             "before-restart-" + tid,
+            owner_key=account_identity("acc-1").fingerprint,
         )
         for tid in ("desktop-one", "desktop-two", "vscode")
     ]
@@ -573,6 +600,7 @@ async def test_two_desktop_jobs_continue_while_ide_reconnects_then_recovers(migr
             goal_signature(GoalInfo(tid, None, None, False)),
             True,
             "owner" if tid == "ide" else None,
+            owner_key=account_identity("acc-1").fingerprint,
         )
         for tid in ("desktop-one", "ide", "desktop-two")
     ]
@@ -584,10 +612,10 @@ async def test_two_desktop_jobs_continue_while_ide_reconnects_then_recovers(migr
         rows = await (await db.execute("SELECT thread_id FROM pending_continuations")).fetchall()
         assert rows == [("ide",)]
     supervisor.ide.wait_inspect.side_effect = ide_turn
-    await supervisor.recover_pending("acc-1")
+    await supervisor.recover_pending(account_identity("acc-1").fingerprint)
     await asyncio.gather(*tuple(supervisor.tasks))
     assert sent == ["desktop-one", "desktop-two", "ide"]
-    await supervisor.recover_pending("acc-1")
+    await supervisor.recover_pending(account_identity("acc-1").fingerprint)
     assert len(sent) == 3
     assert {row.thread_id for row in await supervisor.tracker.visible()} == set(sent)
 
@@ -620,6 +648,7 @@ async def test_owner_change_during_post_restart_verification_blocks_send(migrate
             goal_signature(GoalInfo("thread", None, None, False)),
             True,
             "original",
+            owner_key=account_identity("acc-1").fingerprint,
         )
     )
     supervisor.ide.send.assert_not_awaited()
@@ -673,6 +702,7 @@ async def test_submitted_but_failed_next_turn_requires_attention_without_resendi
             goal_signature(GoalInfo("thread", None, None, False)),
             True,
             "owner",
+            owner_key=account_identity("acc-1").fingerprint,
         )
     )
     supervisor.ide.send.assert_awaited_once()

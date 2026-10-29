@@ -7,7 +7,7 @@ from codex_account_manager.adapters.credential_store import FileCredentialStore
 from codex_account_manager.auth.transaction import AuthTransaction
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.goals.service import GoalService
-from tests.fakes import FakeAppServer, FakeDesktop
+from tests.fakes import FakeAppServer, FakeDesktop, account_auth, account_identity
 
 
 def _factory(account_id):
@@ -23,8 +23,8 @@ async def test_manual_handoff_switches_and_reconciles(migrated_db, monkeypatch):
     p1 = await accounts.create_profile("ana")
     p2 = await accounts.create_profile("hesap2")
     for p, acc in ((p1, "acc-1"), (p2, "acc-2")):
-        (migrated_db.profiles_dir / p.id / "auth.json").write_bytes(b"{}")
-        await accounts.profiles.bind_account(p.id, acc)
+        (migrated_db.profiles_dir / p.id / "auth.json").write_bytes(account_auth(acc))
+        await accounts.profiles.bind_account(p.id, acc, user_id="test-user")
 
     # Active auth currently = acc-1.
     store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
@@ -42,7 +42,7 @@ async def test_manual_handoff_switches_and_reconciles(migrated_db, monkeypatch):
     monkeypatch.setattr(cs, "CodexAppServer", lambda home: fake)
 
     async def verify(_home):
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     service = ContinuityService(accounts=accounts, goals=goals)
@@ -50,7 +50,7 @@ async def test_manual_handoff_switches_and_reconciles(migrated_db, monkeypatch):
     result = await service.handoff("hesap2", thread_id="t1", transaction=tx)
 
     assert result.success is True
-    assert store.read_active() == b"{}"  # profile hesap2's auth is now active
+    assert store.read_active() == account_auth("acc-2")  # profile hesap2's auth is now active
     assert fake.set_goal_calls == []
     # Handoff recorded.
     handoffs = await service.recent_handoffs()

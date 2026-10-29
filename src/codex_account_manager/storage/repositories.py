@@ -11,6 +11,7 @@ import json
 from datetime import UTC, datetime
 
 from codex_account_manager.core.redaction import redact, redact_text
+from codex_account_manager.domain.identity import AccountIdentity
 from codex_account_manager.domain.models import (
     GoalCheckpoint,
     HandoffRecord,
@@ -30,7 +31,7 @@ class ProfileRepository:
         async with connect() as db:
             cursor = await db.execute(
                 """
-                SELECT p.id, p.alias, p.codex_home, pa.account_id, p.created_at
+                SELECT p.id, p.alias, p.codex_home, pa.account_id, p.created_at, pa.user_id
                 FROM profiles p
                 LEFT JOIN profile_accounts pa ON pa.profile_id = p.id
                 ORDER BY p.created_at
@@ -43,7 +44,7 @@ class ProfileRepository:
         async with connect() as db:
             cursor = await db.execute(
                 """
-                SELECT p.id, p.alias, p.codex_home, pa.account_id, p.created_at
+                SELECT p.id, p.alias, p.codex_home, pa.account_id, p.created_at, pa.user_id
                 FROM profiles p
                 LEFT JOIN profile_accounts pa ON pa.profile_id = p.id
                 WHERE p.alias = ?
@@ -71,16 +72,30 @@ class ProfileRepository:
             await db.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
             await db.commit()
 
-    async def bind_account(self, profile_id: str, account_id: str) -> None:
+    async def bind_account(
+        self, profile_id: str, account_id: str, *, user_id: str | None = None
+    ) -> None:
         async with connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            if user_id is None:
+                previous = await (
+                    await db.execute(
+                        "SELECT user_id FROM profile_accounts WHERE profile_id=?", (profile_id,)
+                    )
+                ).fetchone()
+                if previous and previous[0] is not None:
+                    raise ValueError(
+                        "A verified user binding cannot be replaced by a workspace hint."
+                    )
             await db.execute(
                 """
-                INSERT INTO profile_accounts (profile_id, account_id, bound_at)
-                VALUES (?, ?, ?)
+                INSERT INTO profile_accounts (profile_id, account_id, bound_at, user_id)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(profile_id) DO UPDATE SET
-                    account_id = excluded.account_id, bound_at = excluded.bound_at
+                    account_id = excluded.account_id, bound_at = excluded.bound_at,
+                    user_id = excluded.user_id
                 """,
-                (profile_id, account_id, _now_iso()),
+                (profile_id, account_id, _now_iso(), user_id),
             )
             await db.commit()
 
@@ -92,7 +107,29 @@ class ProfileRepository:
             codex_home=row[2],
             bound_account_id=row[3],
             created_at=datetime.fromisoformat(row[4]),
+            bound_user_id=row[5],
         )
+
+    async def upgrade_legacy_identity(self, profile: Profile, identity: AccountIdentity) -> bool:
+        if not identity.owner_key or identity.workspace_id != profile.bound_account_id:
+            return False
+        async with connect() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            other = await (
+                await db.execute(
+                    "SELECT 1 FROM profile_accounts WHERE account_id=? AND profile_id<>?",
+                    (profile.bound_account_id, profile.id),
+                )
+            ).fetchone()
+            if other:
+                return False
+            cursor = await db.execute(
+                "UPDATE profile_accounts SET user_id=?, bound_at=? "
+                "WHERE profile_id=? AND account_id=? AND user_id IS NULL",
+                (identity.user_id, _now_iso(), profile.id, profile.bound_account_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
 
 
 class ThreadRepository:

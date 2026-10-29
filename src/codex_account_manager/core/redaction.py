@@ -38,6 +38,13 @@ _SENSITIVE_KEYS = frozenset(
         "cookie",
         "session",
         "private_key",
+        "user_id",
+        "userid",
+        "chatgpt_user_id",
+        "session_id",
+        "sessionid",
+        "activesessionid",
+        "login_owner_id",
     }
 )
 
@@ -54,7 +61,7 @@ def redact_text(value: str) -> str:
     if not value:
         return value
     result = re.sub(
-        r"(?i)([\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|openai_api_key|password|client_secret|authorization|cookie|secret|token|session|auth_json|auth|private_key)[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
+        r"(?i)([\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|openai_api_key|password|client_secret|authorization|cookie|secret|token|(?:chatgpt_)?user[_-]?id|(?:active)?session[_-]?id|login_owner_id|session|auth_json|auth|private_key)[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)",
         lambda match: match.group(1) + _MASK,
         _BEARER_RE.sub(_MASK, value),
     )

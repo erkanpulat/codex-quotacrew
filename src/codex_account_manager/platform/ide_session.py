@@ -98,13 +98,13 @@ class IDESession:
     def __init__(self):
         self._refreshed: tuple[str, int, float] | None = None
 
-    async def needs_refresh(self, account_id: str) -> bool:
+    async def needs_refresh(self, owner_key: str) -> bool:
         window = await asyncio.to_thread(running_window)
-        return self._refreshed != (account_id, window.pid, window.created_at)
+        return self._refreshed != (owner_key, window.pid, window.created_at)
 
-    async def refresh(self, account_id: str, thread_id: str, workspace: str) -> None:
+    async def refresh(self, owner_key: str, thread_id: str, workspace: str) -> None:
         window = await asyncio.to_thread(running_window)
-        if self._refreshed == (account_id, window.pid, window.created_at):
+        if self._refreshed == (owner_key, window.pid, window.created_at):
             await asyncio.to_thread(open_thread, window.executable, thread_id)
             return
         path = Path(workspace)
@@ -126,7 +126,7 @@ class IDESession:
                     try:
                         opened = await asyncio.to_thread(running_window)
                         if (opened.pid, opened.created_at) != (window.pid, window.created_at):
-                            self._refreshed = (account_id, opened.pid, opened.created_at)
+                            self._refreshed = (owner_key, opened.pid, opened.created_at)
                             return
                     except AppServerError:
                         pass

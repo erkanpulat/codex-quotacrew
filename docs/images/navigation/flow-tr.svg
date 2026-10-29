@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="152" height="44" viewBox="0 0 152 44" role="img" aria-label="Nasıl çalışır?">
+  <title>Nasıl çalışır?</title>
+  <rect x="0.5" y="0.5" width="151" height="43" rx="10" fill="#1e2936" stroke="#2b394a"/>
+  <g transform="translate(14 11) scale(.9)" fill="none" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4Z"/></g>
+  <text x="45" y="27" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600">Nasıl çalışır?</text>
+</svg>

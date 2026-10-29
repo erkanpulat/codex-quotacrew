@@ -4,8 +4,27 @@ from unittest.mock import AsyncMock
 from codex_account_manager.adapters.interfaces import GoalInfo
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.continuity.tracking import WorkTracker
-from tests.fakes import FakeAppServer
+from codex_account_manager.domain.identity import AccountIdentity
+from tests.fakes import FakeAppServer, account_identity
 from tests.integration.test_limit_continuation import _limited_turn, _thread
+
+
+async def test_legacy_observation_keeps_unknown_owner_until_fresh_running_turn(migrated_db):
+    tracker = WorkTracker()
+    absent = GoalInfo("thread", None, None, False)
+    legacy_key = "a" * 64
+    await tracker.observe(legacy_key, "thread", {"id": "turn", "status": "inProgress"}, absent)
+    await tracker.unverified()
+    current = account_identity("W1", "U2").fingerprint
+    await tracker.observe(
+        current, "thread", {"id": "turn", "status": "failed"}, absent, limited=True
+    )
+    old = (await tracker.visible())[0]
+    assert old.account_hash == legacy_key and not old.verified
+    assert not await tracker.limited(current)
+    await tracker.observe(current, "thread", {"id": "next", "status": "inProgress"}, absent)
+    running = (await tracker.visible())[0]
+    assert running.account_hash == current and running.verified
 
 
 async def test_visible_distinguishes_queued_and_unverified_desktop_continuations(migrated_db):
@@ -18,18 +37,28 @@ async def test_visible_distinguishes_queued_and_unverified_desktop_continuations
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
     await tracker.observe(
-        "old-account",
+        account_identity("old-account").fingerprint,
         "thread",
         {"id": "running", "status": "inProgress"},
         goal,
     )
-    await tracker.observe("old-account", "thread", _limited_turn(), goal, limited=True)
+    await tracker.observe(
+        account_identity("old-account").fingerprint, "thread", _limited_turn(), goal, limited=True
+    )
     await tracker.await_desktop(
-        "old-account", "new-account", ["thread"], turn_ids={"thread": "limited-turn"}
+        account_identity("old-account").fingerprint,
+        account_identity("new-account").fingerprint,
+        ["thread"],
+        turn_ids={"thread": "limited-turn"},
     )
 
     ticket = ContinuationTicket(
-        "thread", "limited-turn", "new-account", goal_signature(goal), desktop=True
+        "thread",
+        "limited-turn",
+        "new-account",
+        goal_signature(goal),
+        desktop=True,
+        owner_key=account_identity("new-account").fingerprint,
     )
     supervisor = ContinuationSupervisor()
     await supervisor.save_pending([ticket])
@@ -45,7 +74,12 @@ async def test_visible_distinguishes_queued_and_unverified_desktop_continuations
     assert unresolved.continuation_status == "uncertain"
 
     await supervisor.save_pending([ticket])
-    await tracker.observe("new-account", "thread", {"id": "new-turn", "status": "inProgress"}, goal)
+    await tracker.observe(
+        account_identity("new-account").fingerprint,
+        "thread",
+        {"id": "new-turn", "status": "inProgress"},
+        goal,
+    )
     running = (await tracker.visible())[0]
     assert not running.continuation_pending
     assert running.continuation_status is None
@@ -61,12 +95,18 @@ async def test_expired_continuation_is_not_presented_as_queued(migrated_db, monk
     monkeypatch.setattr(module.time, "time", lambda: 1000)
     tracker = WorkTracker()
     await tracker.observe(
-        "account",
+        account_identity("account").fingerprint,
         "thread",
         {"id": "turn", "status": "inProgress"},
         GoalInfo("thread", None, None, False),
     )
-    await ContinuationSupervisor().save_pending([ContinuationTicket("thread", "turn", "account")])
+    await ContinuationSupervisor().save_pending(
+        [
+            ContinuationTicket(
+                "thread", "turn", "account", owner_key=account_identity("account").fingerprint
+            )
+        ]
+    )
     assert (await tracker.visible())[0].continuation_pending
     monkeypatch.setattr(module.time, "time", lambda: 1600)
     assert not (await tracker.visible())[0].continuation_pending
@@ -78,14 +118,14 @@ async def test_verified_only_excludes_expired_observations(migrated_db, monkeypa
     tracker = WorkTracker()
     monkeypatch.setattr(module.time, "time", lambda: 1000)
     await tracker.observe(
-        "account-a",
+        account_identity("account-a").fingerprint,
         "working",
         {"id": "turn", "status": "inProgress"},
         GoalInfo("working", None, None, False),
     )
     monkeypatch.setattr(module.time, "time", lambda: 2000)
-    assert not await tracker.visible("account-a", verified_only=True)
-    saved = await tracker.visible("account-a")
+    assert not await tracker.visible(account_identity("account-a").fingerprint, verified_only=True)
+    saved = await tracker.visible(account_identity("account-a").fingerprint)
     assert len(saved) == 1 and not saved[0].verified
 
 
@@ -96,15 +136,17 @@ async def test_jobs_snapshot_without_active_account_never_shows_other_accounts(
     from codex_account_manager.gui.conversations import ConversationsView
 
     await WorkTracker().observe(
-        "account-a",
+        account_identity("account-a").fingerprint,
         "working",
         {"id": "turn", "status": "inProgress"},
         GoalInfo("working", None, None, False),
     )
-    monkeypatch.setattr(FileCredentialStore, "active_account_hint", lambda self: None)
+    monkeypatch.setattr(FileCredentialStore, "active_identity_hint", lambda self: AccountIdentity())
     rows, _names = await ConversationsView._tracking_snapshot()
     assert rows == []
-    monkeypatch.setattr(FileCredentialStore, "active_account_hint", lambda self: "account-a")
+    monkeypatch.setattr(
+        FileCredentialStore, "active_identity_hint", lambda self: account_identity("account-a")
+    )
     rows, _names = await ConversationsView._tracking_snapshot()
     assert [row.thread_id for row in rows] == ["working"]
 
@@ -118,12 +160,14 @@ async def test_manual_account_switch_does_not_hide_previously_tracked_jobs(
     tracker = WorkTracker()
     for tid in ("one", "two", "three", "four"):
         await tracker.observe(
-            "current" if tid == "four" else "previous",
+            account_identity("current" if tid == "four" else "previous").fingerprint,
             tid,
             {"id": "turn", "status": "inProgress"},
             GoalInfo(tid, None, None, False),
         )
-    monkeypatch.setattr(FileCredentialStore, "active_account_hint", lambda _self: "current")
+    monkeypatch.setattr(
+        FileCredentialStore, "active_identity_hint", lambda _self: account_identity("current")
+    )
     rows, _names = await ConversationsView._tracking_snapshot()
     assert {row.thread_id for row in rows} == {"one", "two", "three", "four"}
 
@@ -131,8 +175,12 @@ async def test_manual_account_switch_does_not_hide_previously_tracked_jobs(
 async def test_stopped_turn_on_new_account_cannot_keep_verified_running_badge(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", "Continue this goal", "active", True)
-    await tracker.observe("old", "thread", {"id": "turn", "status": "inProgress"}, goal)
-    await tracker.observe("new", "thread", {"id": "turn", "status": "interrupted"}, goal)
+    await tracker.observe(
+        account_identity("old").fingerprint, "thread", {"id": "turn", "status": "inProgress"}, goal
+    )
+    await tracker.observe(
+        account_identity("new").fingerprint, "thread", {"id": "turn", "status": "interrupted"}, goal
+    )
     row = (await tracker.visible())[0]
     assert not (row.verified and row.turn_status == "inProgress")
 
@@ -150,7 +198,7 @@ async def test_unavailable_tracked_owner_blocks_restart_during_cooldown(migrated
     monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
     service = ContinuityService()
     await service.tracker.observe(
-        "account-a",
+        account_identity("account-a").fingerprint,
         "working",
         {"id": "turn", "status": "inProgress"},
         GoalInfo("working", None, None, False),
@@ -221,13 +269,13 @@ async def test_tracking_scan_does_not_drop_work_outside_recent_page(migrated_db,
     monkeypatch.setattr(module, "CodexAppServer", lambda *_args, **_kwargs: server)
     tracker = WorkTracker()
     await tracker.observe(
-        "account-a",
+        account_identity("account-a").fingerprint,
         "59",
         {"id": "turn", "status": "inProgress"},
         GoalInfo("59", None, None, False),
     )
     await ContinuityService().observe_work()
-    assert "59" in await WorkTracker().ids("account-a")
+    assert "59" in await WorkTracker().ids(account_identity("account-a").fingerprint)
 
 
 async def test_two_desktop_threads_capture_fast_quota_turn_between_polls(migrated_db, monkeypatch):
@@ -253,9 +301,13 @@ async def test_two_desktop_threads_capture_fast_quota_turn_between_polls(migrate
         two={**_limited_turn(), "id": "fast-failure"},
     )
     await service.observe_work()
-    assert {row[0] for row in await service.tracker.limited("account-a")} == {"one", "two"}
+    assert {
+        row[0] for row in await service.tracker.limited(account_identity("account-a").fingerprint)
+    } == {"one", "two"}
     await service.observe_work()
-    assert {row[0] for row in await service.tracker.limited("account-a")} == {"one", "two"}
+    assert {
+        row[0] for row in await service.tracker.limited(account_identity("account-a").fingerprint)
+    } == {"one", "two"}
 
 
 async def test_two_live_desktop_jobs_are_tracked_despite_stored_interruption(
@@ -312,49 +364,94 @@ async def test_two_live_desktop_jobs_are_tracked_despite_stored_interruption(
 async def test_new_failed_turn_after_restart_preserves_observed_work(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
-    await tracker.observe("account", "thread", {"id": "running", "status": "inProgress"}, goal)
+    await tracker.observe(
+        account_identity("account").fingerprint,
+        "thread",
+        {"id": "running", "status": "inProgress"},
+        goal,
+    )
     restarted = WorkTracker()
-    await restarted.observe("account", "thread", _limited_turn(), goal, limited=True)
-    assert (await restarted.limited("account"))[0][1] == "limited-turn"
+    await restarted.observe(
+        account_identity("account").fingerprint, "thread", _limited_turn(), goal, limited=True
+    )
+    assert (await restarted.limited(account_identity("account").fingerprint))[0][
+        1
+    ] == "limited-turn"
 
 
 async def test_old_quota_failure_is_not_adopted_by_another_account(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
-    await tracker.observe("previous", "thread", {"id": "running", "status": "inProgress"}, goal)
-    await tracker.observe("new", "thread", _limited_turn(), goal, limited=True)
-    assert not await tracker.limited("new")
+    await tracker.observe(
+        account_identity("previous").fingerprint,
+        "thread",
+        {"id": "running", "status": "inProgress"},
+        goal,
+    )
+    await tracker.observe(
+        account_identity("new").fingerprint, "thread", _limited_turn(), goal, limited=True
+    )
+    assert not await tracker.limited(account_identity("new").fingerprint)
 
 
 async def test_previous_account_work_keeps_live_status_without_adopting_its_limit(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
-    await tracker.observe("previous", "thread", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.observe(
+        account_identity("previous").fingerprint,
+        "thread",
+        {"id": "turn", "status": "inProgress"},
+        goal,
+    )
     await tracker.unverified(["thread"])
-    await tracker.observe("current", "thread", _limited_turn(), goal, limited=True)
+    await tracker.observe(
+        account_identity("current").fingerprint, "thread", _limited_turn(), goal, limited=True
+    )
     saved = await tracker.visible()
     assert len(saved) == 1
     assert saved[0].verified and saved[0].limited and saved[0].turn_status == "failed"
-    assert not await tracker.limited("current")
+    assert not await tracker.limited(account_identity("current").fingerprint)
 
 
 async def test_visible_can_limit_to_active_account_and_verified_rows(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
-    await tracker.observe("account-a", "running", {"id": "turn", "status": "inProgress"}, goal)
-    await tracker.observe("account-b", "other", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.observe(
+        account_identity("account-a").fingerprint,
+        "running",
+        {"id": "turn", "status": "inProgress"},
+        goal,
+    )
+    await tracker.observe(
+        account_identity("account-b").fingerprint,
+        "other",
+        {"id": "turn", "status": "inProgress"},
+        goal,
+    )
     await tracker.unverified(["running"])
-    assert {row.thread_id for row in await tracker.visible("account-b", verified_only=True)} == {
-        "other"
-    }
-    assert await tracker.visible("account-a", verified_only=True) == []
+    assert {
+        row.thread_id
+        for row in await tracker.visible(
+            account_identity("account-b").fingerprint, verified_only=True
+        )
+    } == {"other"}
+    assert (
+        await tracker.visible(account_identity("account-a").fingerprint, verified_only=True) == []
+    )
 
 
 async def test_completed_work_is_retired_after_account_switch(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
-    await tracker.observe("previous", "thread", {"id": "turn", "status": "inProgress"}, goal)
-    await tracker.observe("new", "thread", {"id": "turn", "status": "completed"}, goal)
+    await tracker.observe(
+        account_identity("previous").fingerprint,
+        "thread",
+        {"id": "turn", "status": "inProgress"},
+        goal,
+    )
+    await tracker.observe(
+        account_identity("new").fingerprint, "thread", {"id": "turn", "status": "completed"}, goal
+    )
     assert not await tracker.visible()
 
 
@@ -370,24 +467,36 @@ async def test_running_work_survives_restart_and_remains_tracked_outside_recent_
     )
     monkeypatch.setattr(module, "CodexAppServer", lambda _, **kwargs: server)
     await ContinuityService().observe_work()
-    assert await WorkTracker().ids("account-a") == ["working"]
+    assert await WorkTracker().ids(account_identity("account-a").fingerprint) == ["working"]
     server._threads.extend(_thread(str(i), 1000 + i) for i in range(25))
     server._turns["working"] = _limited_turn()
     restarted = ContinuityService()
     await restarted.observe_work()
-    assert (await restarted.tracker.limited("account-a"))[0][1] == "limited-turn"
+    assert (await restarted.tracker.limited(account_identity("account-a").fingerprint))[0][
+        1
+    ] == "limited-turn"
 
 
 async def test_new_turn_invalidates_saved_interruption(migrated_db):
     tracker = WorkTracker()
     absent = GoalInfo("thread", None, None, False)
     await tracker.observe(
-        "account-a", "thread", {"id": "limited-turn", "status": "inProgress"}, absent
+        account_identity("account-a").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        absent,
     )
-    await tracker.observe("account-a", "thread", _limited_turn(), absent, limited=True)
-    assert await tracker.limited("account-a")
-    await tracker.observe("account-a", "thread", {"id": "user", "status": "completed"}, absent)
-    assert not await tracker.limited("account-a")
+    await tracker.observe(
+        account_identity("account-a").fingerprint, "thread", _limited_turn(), absent, limited=True
+    )
+    assert await tracker.limited(account_identity("account-a").fingerprint)
+    await tracker.observe(
+        account_identity("account-a").fingerprint,
+        "thread",
+        {"id": "user", "status": "completed"},
+        absent,
+    )
+    assert not await tracker.limited(account_identity("account-a").fingerprint)
 
 
 async def test_unverifiable_goal_keeps_checkpoint_for_later_revalidation(migrated_db, monkeypatch):
@@ -396,16 +505,21 @@ async def test_unverifiable_goal_keeps_checkpoint_for_later_revalidation(migrate
     tracker = WorkTracker()
     absent = GoalInfo("thread", None, None, False)
     await tracker.observe(
-        "account-a", "thread", {"id": "limited-turn", "status": "inProgress"}, absent
+        account_identity("account-a").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        absent,
     )
-    await tracker.observe("account-a", "thread", _limited_turn(), absent, limited=True)
+    await tracker.observe(
+        account_identity("account-a").fingerprint, "thread", _limited_turn(), absent, limited=True
+    )
     server = FakeAppServer(
         account_id="account-a", threads=[_thread("thread", 100)], turns={"thread": _limited_turn()}
     )
     server.get_goal = lambda _thread_id: _unknown_goal()
     monkeypatch.setattr(module, "CodexAppServer", lambda _, **kwargs: server)
     await ContinuityService().observe_work()
-    assert not await tracker.limited("account-a")
+    assert not await tracker.limited(account_identity("account-a").fingerprint)
     saved = await tracker.visible()
     assert len(saved) == 1 and saved[0].thread_id == "thread" and saved[0].limited
     assert not saved[0].verified
@@ -420,7 +534,10 @@ async def test_unknown_goal_preserves_known_goal_without_blocking_other_observat
     service = ContinuityService()
     goal = GoalInfo("unknown", "finish the design", "active", True, 2000)
     await service.tracker.observe(
-        "account-a", "unknown", {"id": "running", "status": "inProgress"}, goal
+        account_identity("account-a").fingerprint,
+        "unknown",
+        {"id": "running", "status": "inProgress"},
+        goal,
     )
     server = FakeAppServer(
         account_id="account-a",
@@ -480,7 +597,7 @@ async def test_deleted_conversations_are_removed_only_after_successful_listing(
 
     tracker = WorkTracker()
     await tracker.observe(
-        "account-a",
+        account_identity("account-a").fingerprint,
         "deleted",
         {"id": "turn", "status": "inProgress"},
         GoalInfo("deleted", None, None, False),
@@ -509,10 +626,19 @@ async def test_reset_pauses_monitoring_and_invalidates_in_flight_observation(mig
     tracker = WorkTracker()
     old_generation = tracker.generation
     goal = GoalInfo("work", None, None, False)
-    await tracker.observe("account", "work", {"id": "turn", "status": "inProgress"}, goal)
+    await tracker.observe(
+        account_identity("account").fingerprint,
+        "work",
+        {"id": "turn", "status": "inProgress"},
+        goal,
+    )
     await tracker.reset()
     await tracker.observe(
-        "account", "work", {"id": "turn", "status": "inProgress"}, goal, generation=old_generation
+        account_identity("account").fingerprint,
+        "work",
+        {"id": "turn", "status": "inProgress"},
+        goal,
+        generation=old_generation,
     )
     assert await tracker.visible() == []
     assert await SettingsRepository().get("monitor_enabled") == "false"
@@ -525,14 +651,21 @@ async def test_saved_observation_expires_without_losing_continuation_checkpoint(
 
     tracker = WorkTracker()
     goal = GoalInfo("work", None, None, False)
-    await tracker.observe("account", "work", {"id": "limited-turn", "status": "inProgress"}, goal)
-    await tracker.observe("account", "work", _limited_turn(), goal, limited=True)
+    await tracker.observe(
+        account_identity("account").fingerprint,
+        "work",
+        {"id": "limited-turn", "status": "inProgress"},
+        goal,
+    )
+    await tracker.observe(
+        account_identity("account").fingerprint, "work", _limited_turn(), goal, limited=True
+    )
     async with connect() as db:
         await db.execute("UPDATE observed_work SET observed_at=?", (time.time() - 240,))
         await db.commit()
     saved = await tracker.visible()
     assert saved[0].limited and not saved[0].verified
-    assert await tracker.limited("account")
+    assert await tracker.limited(account_identity("account").fingerprint)
 
 
 async def test_multiple_interrupted_conversations_survive_restart_without_content(migrated_db):
@@ -542,10 +675,17 @@ async def test_multiple_interrupted_conversations_survive_restart_without_conten
     for tid in ("one", "two"):
         goal = GoalInfo(tid, "private objective", "usageLimited", True, 500, 10)
         await tracker.observe(
-            "account-a", tid, {"id": "limited-turn", "status": "inProgress"}, goal
+            account_identity("account-a").fingerprint,
+            tid,
+            {"id": "limited-turn", "status": "inProgress"},
+            goal,
         )
-        await tracker.observe("account-a", tid, _limited_turn(), goal, limited=True)
-    assert {row[0] for row in await WorkTracker().limited("account-a")} == {"one", "two"}
+        await tracker.observe(
+            account_identity("account-a").fingerprint, tid, _limited_turn(), goal, limited=True
+        )
+    assert {
+        row[0] for row in await WorkTracker().limited(account_identity("account-a").fingerprint)
+    } == {"one", "two"}
     async with connect() as db:
         rows = await (await db.execute("SELECT goal_fingerprint FROM observed_work")).fetchall()
     assert all("private objective" not in row[0] for row in rows)
@@ -557,8 +697,10 @@ async def test_multiple_interrupted_conversations_survive_restart_without_conten
 async def test_historical_limit_without_observed_running_turn_is_not_selected(migrated_db):
     tracker = WorkTracker()
     absent = GoalInfo("old", None, None, False)
-    await tracker.observe("account-a", "old", _limited_turn(), absent, limited=True)
-    assert not await tracker.limited("account-a")
+    await tracker.observe(
+        account_identity("account-a").fingerprint, "old", _limited_turn(), absent, limited=True
+    )
+    assert not await tracker.limited(account_identity("account-a").fingerprint)
 
 
 async def test_ide_new_failed_turn_between_polls_is_tracked_but_history_is_not(
@@ -579,20 +721,22 @@ async def test_ide_new_failed_turn_between_polls_is_tracked_but_history_is_not(
     owner = OwnerSnapshot("owner", {"id": "limited-turn", "status": "failed"}, False, None)
     service.automation.ide.inspect = AsyncMock(return_value=owner)
     await service.observe_work()
-    assert not await service.tracker.limited("account-a")
+    assert not await service.tracker.limited(account_identity("account-a").fingerprint)
     server._turns["ide"] = {**_limited_turn(), "id": "new-short-turn"}
     service.automation.ide.inspect.return_value = replace(
         owner, turn={"id": "new-short-turn", "status": "failed"}
     )
     await service.observe_work()
-    assert (await service.tracker.limited("account-a"))[0][1] == "new-short-turn"
+    assert (await service.tracker.limited(account_identity("account-a").fingerprint))[0][
+        1
+    ] == "new-short-turn"
     await service.tracker.reset()
     server._turns["ide"] = {**_limited_turn(), "id": "after-reset"}
     service.automation.ide.inspect.return_value = replace(
         owner, turn={"id": "after-reset", "status": "failed"}
     )
     await service.observe_work()
-    assert not await service.tracker.limited("account-a")
+    assert not await service.tracker.limited(account_identity("account-a").fingerprint)
 
 
 async def test_saved_work_cannot_cross_account_or_survive_new_goal(migrated_db):
@@ -600,24 +744,36 @@ async def test_saved_work_cannot_cross_account_or_survive_new_goal(migrated_db):
     old_goal = GoalInfo("thread", "Original", "active", True, 500, 10)
     new_goal = GoalInfo("thread", "Replacement", "active", True, 500, 10)
     await tracker.observe(
-        "account-a", "thread", {"id": "limited-turn", "status": "inProgress"}, old_goal
+        account_identity("account-a").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        old_goal,
     )
-    await tracker.observe("account-b", "thread", _limited_turn(), old_goal, limited=True)
-    assert not await tracker.limited("account-b")
-    await tracker.observe("account-a", "thread", _limited_turn(), new_goal, limited=True)
-    assert not await tracker.limited("account-a")
+    await tracker.observe(
+        account_identity("account-b").fingerprint, "thread", _limited_turn(), old_goal, limited=True
+    )
+    assert not await tracker.limited(account_identity("account-b").fingerprint)
+    await tracker.observe(
+        account_identity("account-a").fingerprint, "thread", _limited_turn(), new_goal, limited=True
+    )
+    assert not await tracker.limited(account_identity("account-a").fingerprint)
 
 
 async def test_consumed_interruption_is_not_reused(migrated_db):
     tracker = WorkTracker()
     absent = GoalInfo("thread", None, None, False)
     await tracker.observe(
-        "account-a", "thread", {"id": "limited-turn", "status": "inProgress"}, absent
+        account_identity("account-a").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        absent,
     )
-    await tracker.observe("account-a", "thread", _limited_turn(), absent, limited=True)
-    assert await tracker.limited("account-a")
-    await tracker.clear("account-a", ["thread"])
-    assert not await tracker.limited("account-a")
+    await tracker.observe(
+        account_identity("account-a").fingerprint, "thread", _limited_turn(), absent, limited=True
+    )
+    assert await tracker.limited(account_identity("account-a").fingerprint)
+    await tracker.clear(account_identity("account-a").fingerprint, ["thread"])
+    assert not await tracker.limited(account_identity("account-a").fingerprint)
 
 
 async def test_desktop_handoff_keeps_tracking_under_new_account_without_reusing_old_limit(
@@ -626,35 +782,66 @@ async def test_desktop_handoff_keeps_tracking_under_new_account_without_reusing_
     tracker = WorkTracker()
     absent = GoalInfo("thread", None, None, False)
     await tracker.observe(
-        "old-account", "thread", {"id": "limited-turn", "status": "inProgress"}, absent
+        account_identity("old-account").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        absent,
     )
-    await tracker.observe("old-account", "thread", _limited_turn(), absent, limited=True)
-    await tracker.await_desktop("old-account", "new-account", ["thread"])
+    await tracker.observe(
+        account_identity("old-account").fingerprint, "thread", _limited_turn(), absent, limited=True
+    )
+    await tracker.await_desktop(
+        account_identity("old-account").fingerprint,
+        account_identity("new-account").fingerprint,
+        ["thread"],
+    )
     pending = await tracker.visible()
     assert pending[0].turn_status == "awaitingDesktop"
-    assert await tracker.ids("new-account") == ["thread"]
-    assert not await tracker.limited("new-account")
-    assert not await tracker.limited("old-account")
+    assert await tracker.ids(account_identity("new-account").fingerprint) == ["thread"]
+    assert not await tracker.limited(account_identity("new-account").fingerprint)
+    assert not await tracker.limited(account_identity("old-account").fingerprint)
     await tracker.unverified(["thread"])
-    await tracker.observe("new-account", "thread", _limited_turn(), absent, limited=True)
+    await tracker.observe(
+        account_identity("new-account").fingerprint, "thread", _limited_turn(), absent, limited=True
+    )
     refreshed = (await tracker.visible())[0]
     assert refreshed.turn_status == "awaitingDesktop" and refreshed.verified
-    assert not await tracker.limited("new-account")
-    await tracker.observe("new-account", "thread", {"id": "next", "status": "inProgress"}, absent)
+    assert not await tracker.limited(account_identity("new-account").fingerprint)
     await tracker.observe(
-        "new-account", "thread", {**_limited_turn(), "id": "next"}, absent, limited=True
+        account_identity("new-account").fingerprint,
+        "thread",
+        {"id": "next", "status": "inProgress"},
+        absent,
     )
-    assert (await tracker.limited("new-account"))[0][1] == "next"
+    await tracker.observe(
+        account_identity("new-account").fingerprint,
+        "thread",
+        {**_limited_turn(), "id": "next"},
+        absent,
+        limited=True,
+    )
+    assert (await tracker.limited(account_identity("new-account").fingerprint))[0][1] == "next"
 
 
 async def test_desktop_followup_cannot_transfer_another_accounts_work(migrated_db):
     tracker = WorkTracker()
     absent = GoalInfo("thread", None, None, False)
-    await tracker.observe("owner", "thread", {"id": "limited-turn", "status": "inProgress"}, absent)
-    await tracker.observe("owner", "thread", _limited_turn(), absent, limited=True)
-    await tracker.await_desktop("unrelated", "target", ["thread"])
-    assert await tracker.limited("owner")
-    assert not await tracker.ids("target")
+    await tracker.observe(
+        account_identity("owner").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        absent,
+    )
+    await tracker.observe(
+        account_identity("owner").fingerprint, "thread", _limited_turn(), absent, limited=True
+    )
+    await tracker.await_desktop(
+        account_identity("unrelated").fingerprint,
+        account_identity("target").fingerprint,
+        ["thread"],
+    )
+    assert await tracker.limited(account_identity("owner").fingerprint)
+    assert not await tracker.ids(account_identity("target").fingerprint)
 
 
 async def test_stalled_cli_read_does_not_hide_four_desktop_jobs(migrated_db, monkeypatch):
@@ -684,8 +871,10 @@ async def test_stalled_cli_read_does_not_hide_four_desktop_jobs(migrated_db, mon
     monkeypatch.setattr(module, "THREAD_CHECK_TIMEOUT", 1)
     service = ContinuityService()
     service.automation.native.latest_turn = read
-    assert await service.observe_work() == "account-a"
-    assert set(await WorkTracker().ids("account-a")) == set(desktop_ids)
+    assert await service.observe_work() == account_identity("account-a").fingerprint
+    assert set(await WorkTracker().ids(account_identity("account-a").fingerprint)) == set(
+        desktop_ids
+    )
 
 
 async def test_stalled_conversation_does_not_hide_running_work(migrated_db, monkeypatch):
@@ -722,11 +911,11 @@ async def test_stalled_conversation_does_not_hide_running_work(migrated_db, monk
     try:
         service = module.ContinuityService()
         service.automation.native.latest_turn = observed
-        assert await service.observe_work() == "account-a"
+        assert await service.observe_work() == account_identity("account-a").fingerprint
     finally:
         unsubscribe()
     assert cancelled.is_set()
-    assert await WorkTracker().ids("account-a") == ["live"]
+    assert await WorkTracker().ids(account_identity("account-a").fingerprint) == ["live"]
     assert statuses[-1]["state"] == "partial"
     assert statuses[-1]["checked"] == 1
     assert statuses[-1]["unavailable"] == 1
@@ -763,9 +952,9 @@ async def test_scan_deadline_preserves_results_and_cancels_pending_reads(migrate
     monkeypatch.setattr(module, "THREAD_CHECK_TIMEOUT", 10)
     service = module.ContinuityService()
     service.automation.native.latest_turn = observed
-    assert await service.observe_work() == "account-a"
+    assert await service.observe_work() == account_identity("account-a").fingerprint
     assert not pending
-    assert await WorkTracker().ids("account-a") == ["live"]
+    assert await WorkTracker().ids(account_identity("account-a").fingerprint) == ["live"]
 
 
 async def test_desktop_limit_keeps_running_checkpoint_when_summary_omits_error_code(
@@ -783,7 +972,7 @@ async def test_desktop_limit_keeps_running_checkpoint_when_summary_omits_error_c
     server.is_desktop_thread = AsyncMock(return_value=True)
     service.automation.native.latest_turn = AsyncMock(return_value=running)
     await service.observe_work()
-    assert await service.tracker.ids("owner") == ["desktop"]
+    assert await service.tracker.ids(account_identity("owner").fingerprint) == ["desktop"]
     server._turns["desktop"] = {**_limited_turn(), "id": "same-turn"}
     service.automation.native.latest_turn.return_value = {
         "id": "same-turn",
@@ -791,7 +980,9 @@ async def test_desktop_limit_keeps_running_checkpoint_when_summary_omits_error_c
         "error": {"message": "Localized quota error"},
     }
     await service.observe_work()
-    assert (await service.tracker.limited("owner"))[0][1] == "same-turn"
+    assert (await service.tracker.limited(account_identity("owner").fingerprint))[0][
+        1
+    ] == "same-turn"
 
 
 async def test_unsupported_sources_are_counted_without_native_or_turn_queries(
@@ -880,11 +1071,20 @@ async def test_support_probe_is_read_only_and_does_not_treat_ide_as_desktop(
 async def test_failed_recheck_excludes_old_limited_checkpoint_until_verified(migrated_db):
     tracker = WorkTracker()
     goal = GoalInfo("thread", None, None, False)
-    await tracker.observe("account", "thread", {"id": "limited-turn", "status": "inProgress"}, goal)
-    await tracker.observe("account", "thread", _limited_turn(), goal, limited=True)
-    assert len(await tracker.limited("account")) == 1
+    await tracker.observe(
+        account_identity("account").fingerprint,
+        "thread",
+        {"id": "limited-turn", "status": "inProgress"},
+        goal,
+    )
+    await tracker.observe(
+        account_identity("account").fingerprint, "thread", _limited_turn(), goal, limited=True
+    )
+    assert len(await tracker.limited(account_identity("account").fingerprint)) == 1
     await tracker.unverified(["thread"])
-    assert not await tracker.limited("account")
+    assert not await tracker.limited(account_identity("account").fingerprint)
     assert len(await tracker.visible()) == 1
-    await tracker.observe("account", "thread", _limited_turn(), goal, limited=True)
-    assert len(await tracker.limited("account")) == 1
+    await tracker.observe(
+        account_identity("account").fingerprint, "thread", _limited_turn(), goal, limited=True
+    )
+    assert len(await tracker.limited(account_identity("account").fingerprint)) == 1

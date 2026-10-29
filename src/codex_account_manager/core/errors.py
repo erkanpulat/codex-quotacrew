@@ -25,6 +25,10 @@ class AppServerError(AccountManagerError):
     """The Codex App Server failed to start, respond, or shut down cleanly."""
 
 
+class UnsupportedMethodError(AppServerError):
+    """The server explicitly returned JSON-RPC method-not-found (-32601)."""
+
+
 class SignInRequiredError(AppServerError):
     """Codex explicitly reported a missing or permanently rejected sign-in."""
 

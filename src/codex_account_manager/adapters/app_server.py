@@ -8,9 +8,16 @@ import re
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path
 
 from codex_account_manager import __version__
+from codex_account_manager.adapters.account_identity import account_scope, session_identity
+from codex_account_manager.adapters.auth_identity import (
+    AuthEvidence,
+    read_auth_evidence,
+    stable_auth_identity,
+)
 from codex_account_manager.adapters.credential_store import ProfileAuthSession
 from codex_account_manager.adapters.interfaces import CapabilitySet, GoalInfo, ServerInfo
 from codex_account_manager.adapters.subscription import subscription_period
@@ -26,11 +33,13 @@ from codex_account_manager.core.errors import (
     DesktopContinuationRequired,
     SignedOutError,
     SignInRequiredError,
+    UnsupportedMethodError,
     WorkspaceRoutingUnauthorizedError,
 )
 from codex_account_manager.core.logging import get_logger
 from codex_account_manager.core.protection import CredentialProtectionError
 from codex_account_manager.core.redaction import redact_text
+from codex_account_manager.domain.identity import AccountIdentity, IdentityState, reconcile_identity
 from codex_account_manager.domain.models import AccountSnapshot, ThreadInfo
 
 log = get_logger(__name__)
@@ -65,6 +74,8 @@ class CodexAppServer:
         self._closing = False
         self._auth_session: ProfileAuthSession | None = None
         self._child_lifetime = ChildProcessLifetime()
+        self._starting_auth: AuthEvidence | None = None
+        self._session_unsupported = False
 
     async def start(self) -> ServerInfo:
         if self._proc is not None:
@@ -76,6 +87,7 @@ class CodexAppServer:
         self._auth_session = ProfileAuthSession(self.codex_home)
         self._auth_session.__enter__()
         try:
+            self._starting_auth = read_auth_evidence(self.codex_home)
             self._proc = await asyncio.create_subprocess_exec(
                 *codex_command("app-server", "--listen", "stdio://"),
                 stdin=asyncio.subprocess.PIPE,
@@ -269,7 +281,25 @@ class CodexAppServer:
                 fut = self._pending.pop(msg_id)
                 if not fut.done():
                     if "error" in message:
-                        fut.set_exception(AppServerError(redact_text(str(message["error"]))))
+                        error = message["error"]
+                        error_type = (
+                            UnsupportedMethodError
+                            if isinstance(error, dict)
+                            and (
+                                error.get("code") == -32601
+                                or (
+                                    error.get("code") == -32600
+                                    and isinstance(error.get("message"), str)
+                                    and re.fullmatch(
+                                        r"Invalid request: unknown variant `accountSession/list`, "
+                                        r"expected one of `[^`]+`(?:, `[^`]+`)*",
+                                        error["message"],
+                                    )
+                                )
+                            )
+                            else AppServerError
+                        )
+                        fut.set_exception(error_type(redact_text(str(error))))
                     elif isinstance(message.get("result", {}), dict):
                         fut.set_result(message.get("result") or {})
                     else:
@@ -370,9 +400,33 @@ class CodexAppServer:
         except (ValidationError, TypeError, AttributeError):
             return None
 
-    async def read_account(self, *, force_refresh: bool = False) -> AccountSnapshot:
+    async def read_account(
+        self, *, force_refresh: bool = False, include_identity: bool = False
+    ) -> AccountSnapshot:
         if force_refresh and not self.refresh_on_unauthorized:
             raise AppServerError("Forced refresh requires an isolated account profile.")
+        if include_identity:
+            local_before = read_auth_evidence(self.codex_home)
+            before = await self._session_identity()
+            unsupported_before = self._session_unsupported
+            snapshot = await self.read_account(force_refresh=force_refresh)
+            after = await self._session_identity()
+            local_after = read_auth_evidence(self.codex_home)
+            scope = snapshot.identity or AccountIdentity()
+            identity = reconcile_identity(scope, before, after)
+            local = stable_auth_identity(self._starting_auth, local_before, local_after)
+            if local.state is IdentityState.CONFLICT:
+                identity = local
+            elif identity.owner_key is not None:
+                if local.owner_key is not None and local.owner_key != identity.owner_key:
+                    identity = AccountIdentity(state=IdentityState.CONFLICT)
+                elif local.owner_key is None and (local_before.revision or local_after.revision):
+                    identity = AccountIdentity()
+            elif (
+                unsupported_before and self._session_unsupported and self._starting_auth is not None
+            ):
+                identity = reconcile_identity(scope, local, local)
+            return replace(snapshot, identity=identity)
         refreshed = force_refresh
         try:
             account_result = await self._request_with_discovery_retry(
@@ -482,6 +536,7 @@ class CodexAppServer:
             or account.get("accountId")
             or account.get("id")
         )
+        identity = account_scope(account_result, rate_result)
 
         plan = account.get("planType") or limits.get("planType")
         period = subscription_period(self.codex_home, account_id, plan, account.get("email"))
@@ -502,7 +557,22 @@ class CodexAppServer:
             rate_limit_reached_type=limits.get("rateLimitReachedType"),
             has_credits=credits.get("hasCredits"),
             reset_credits=self._reset_credits(rate_result.get("rateLimitResetCredits")),
+            identity=identity,
         )
+
+    async def _session_identity(self) -> AccountIdentity:
+        self._session_unsupported = False
+        try:
+            async with asyncio.timeout(min(self.timeout, 2.0)):
+                result = await self._request(
+                    "accountSession/list", {"refreshWorkspaceMetadata": False}
+                )
+        except UnsupportedMethodError:
+            self._session_unsupported = True
+            return AccountIdentity()
+        except (AppServerError, TimeoutError):
+            return AccountIdentity()
+        return session_identity(result)
 
     async def list_threads(
         self,

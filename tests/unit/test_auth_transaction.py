@@ -5,14 +5,20 @@ from codex_account_manager.auth.transaction import AuthTransaction
 from codex_account_manager.core.errors import TransactionError
 from codex_account_manager.domain.models import Profile
 from codex_account_manager.domain.states import TransactionStage
-from tests.fakes import FakeDesktop
+from tests.fakes import FakeDesktop, account_auth, account_identity
 
 
 def _profile(tmp_paths, account_id="acc-1"):
     home = tmp_paths.profiles_dir / "p1"
     home.mkdir(parents=True, exist_ok=True)
-    (home / "auth.json").write_bytes(b'{"account":"new"}')
-    return Profile(id="p1", alias="ana", codex_home=str(home), bound_account_id=account_id)
+    (home / "auth.json").write_bytes(account_auth(account_id))
+    return Profile(
+        id="p1",
+        alias="ana",
+        codex_home=str(home),
+        bound_account_id=account_id,
+        bound_user_id="test-user",
+    )
 
 
 async def test_successful_switch_commits(tmp_paths):
@@ -21,13 +27,13 @@ async def test_successful_switch_commits(tmp_paths):
     profile = _profile(tmp_paths, "acc-1")
 
     async def verify(_home):
-        return "acc-1"
+        return account_identity()
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     result = await tx.switch(profile)
     assert result.success
     assert result.final_stage == TransactionStage.COMMIT
-    assert store.read_active() == b'{"account":"new"}'
+    assert store.read_active() == account_auth()
 
 
 async def test_verification_waits_for_transient_read_contention(tmp_paths, monkeypatch):
@@ -38,11 +44,14 @@ async def test_verification_waits_for_transient_read_contention(tmp_paths, monke
     from codex_account_manager.core.errors import OperationBusyError
 
     read = AsyncMock(
-        side_effect=[OperationBusyError("reader busy"), SimpleNamespace(account_id="target")]
+        side_effect=[
+            OperationBusyError("reader busy"),
+            SimpleNamespace(account_id="target", identity=account_identity("target")),
+        ]
     )
     monkeypatch.setattr(AccountService, "read_snapshot", read)
     result = await AuthTransaction(desktop=FakeDesktop())._verify(tmp_paths.shared_codex_home)
-    assert result == "target"
+    assert result == account_identity("target")
     assert read.await_count == 2
 
 
@@ -67,7 +76,7 @@ async def test_background_profile_read_cannot_abort_activation_after_desktop_sto
             self.session.__enter__()
             return await super().start()
 
-        async def read_account(self):
+        async def read_account(self, *, include_identity=False):
             entered.set()
             await release.wait()
             return await super().read_account()
@@ -88,7 +97,7 @@ async def test_background_profile_read_cannot_abort_activation_after_desktop_sto
     async def verify(_home):
         readers.append(asyncio.create_task(background_read()))
         await asyncio.wait_for(entered.wait(), 2)
-        return "acc-1"
+        return account_identity()
 
     desktop = FakeDesktop()
     try:
@@ -97,7 +106,7 @@ async def test_background_profile_read_cannot_abort_activation_after_desktop_sto
         ).switch(profile)
         assert result.success
         assert desktop.stopped == desktop.launched == 1
-        assert store.read_active() == b'{"account":"new"}'
+        assert store.read_active() == account_auth()
     finally:
         release.set()
         await asyncio.gather(*readers)
@@ -136,7 +145,7 @@ async def test_running_desktop_is_relaunched_when_registration_check_is_unavaila
     profile = _profile(tmp_paths, "acc-1")
 
     async def verify(_home):
-        return "acc-1"
+        return account_identity()
 
     desktop = RunningDesktop()
     result = await AuthTransaction(
@@ -156,18 +165,18 @@ async def test_revoked_target_is_rejected_before_stopping_desktop(
     from codex_account_manager.core.errors import SignInRequiredError
 
     store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
-    store.write_active_atomic(b"original")
+    store.write_active_atomic(account_auth("other"))
     profile = _profile(tmp_paths)
     desktop = FakeDesktop()
     read = AsyncMock(side_effect=SignInRequiredError("refresh_token_invalidated"))
-    monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value="other"))
+    monkeypatch.setattr(AccountService, "_active_owner_key_safe", AsyncMock(return_value="other"))
     monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[]))
     monkeypatch.setattr(AccountService, "read_snapshot", read)
     tx = AuthTransaction(credential_store=store, desktop=desktop)
     with pytest.raises(SignInRequiredError):
         await tx.switch(profile)
     assert desktop.stopped == 0
-    assert store.read_active() == b"original"
+    assert store.read_active() == account_auth("other")
     assert read.await_args.kwargs == {"force_refresh": True}
 
 
@@ -180,11 +189,11 @@ async def test_active_target_is_checked_in_shared_home_without_refreshing_a_copy
     from codex_account_manager.accounts.service import AccountService
 
     store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
-    auth = b'{"tokens":{"account_id":"acc-1"}}'
+    auth = account_auth()
     store.write_active_atomic(auth)
     profile = _profile(tmp_paths)
-    read = AsyncMock(return_value=SimpleNamespace(account_id="acc-1"))
-    monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value="acc-1"))
+    read = AsyncMock(return_value=SimpleNamespace(account_id="acc-1", identity=account_identity()))
+    monkeypatch.setattr(AccountService, "_active_owner_key_safe", AsyncMock(return_value="acc-1"))
     monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[profile]))
     monkeypatch.setattr(AccountService, "read_snapshot", read)
 
@@ -192,7 +201,7 @@ async def test_active_target_is_checked_in_shared_home_without_refreshing_a_copy
         await AuthTransaction(credential_store=store, desktop=FakeDesktop()).switch(profile)
     ).success
     assert all(call.args[0] == store.shared_home for call in read.await_args_list)
-    assert all(call.kwargs == {"force_refresh": False} for call in read.await_args_list)
+    assert all(not call.kwargs.get("force_refresh") for call in read.await_args_list)
     assert store.read_profile(profile.codex_home) == auth
 
 
@@ -207,15 +216,19 @@ async def test_source_rotation_during_shutdown_is_saved_to_its_own_profile(
     from codex_account_manager.accounts.service import AccountService
 
     store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
-    original = b'{"tokens":{"account_id":"source-id"},"generation":1}'
-    final = b'{"tokens":{"account_id":"source-id"},"generation":2}'
+    original = account_auth("source-id")
+    final = account_auth("source-id", generation=2)
     store.write_active_atomic(original)
     target = _profile(tmp_paths)
     source_home = tmp_paths.profiles_dir / "source"
     source_home.mkdir()
     (source_home / "auth.json").write_bytes(original)
     source = Profile(
-        id="source", alias="source", codex_home=str(source_home), bound_account_id="source-id"
+        id="source",
+        alias="source",
+        codex_home=str(source_home),
+        bound_account_id="source-id",
+        bound_user_id="test-user",
     )
 
     class RotatingDesktop(FakeDesktop):
@@ -224,14 +237,14 @@ async def test_source_rotation_during_shutdown_is_saved_to_its_own_profile(
             store.write_active_atomic(final)
 
     async def snapshot(_self, home, **kwargs):
-        source_active = store.read_active() == final
+        source_active = store.read_active() in {original, final}
         if target_fails and Path(home) == store.shared_home and not source_active:
             raise RuntimeError("Target validation failed")
         identity = "source-id" if Path(home) == store.shared_home and source_active else "acc-1"
-        return SimpleNamespace(account_id=identity)
+        return SimpleNamespace(account_id=identity, identity=account_identity(identity))
 
     monkeypatch.setattr(
-        AccountService, "_active_account_id_safe", AsyncMock(return_value="source-id")
+        AccountService, "_active_owner_key_safe", AsyncMock(return_value="source-id")
     )
     monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[source, target]))
     monkeypatch.setattr(AccountService, "read_snapshot", snapshot)
@@ -242,7 +255,7 @@ async def test_source_rotation_during_shutdown_is_saved_to_its_own_profile(
         assert store.read_active() == final
     else:
         assert (await tx.switch(target)).success
-        assert store.read_active() == b'{"account":"new"}'
+        assert store.read_active() == account_auth()
     assert store.read_profile(source.codex_home) == final
 
 
@@ -252,7 +265,7 @@ async def test_account_mismatch_rolls_back(tmp_paths):
     profile = _profile(tmp_paths, "acc-EXPECTED")
 
     async def verify(_home):
-        return "acc-DIFFERENT"  # mismatch
+        return account_identity("acc-DIFFERENT")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     with pytest.raises(TransactionError) as exc:
@@ -361,7 +374,7 @@ async def test_rollback_preserves_credentials_rotated_during_desktop_shutdown(tm
                 store.write_active_atomic(b"rotated-before-exit")
 
     async def wrong_identity(_home):
-        return "wrong-account"
+        return account_identity("wrong-account")
 
     tx = AuthTransaction(
         credential_store=store, desktop=RotatingDesktop(), verify_account=wrong_identity
@@ -377,11 +390,11 @@ async def test_verified_target_retains_rotated_credentials_for_next_switch(tmp_p
     profile = _profile(tmp_paths)
 
     async def rotating_verify(_home):
-        store.write_active_atomic(b"verified-new-generation")
-        return profile.bound_account_id
+        store.write_active_atomic(account_auth(generation=2))
+        return profile.identity
 
     tx = AuthTransaction(
         credential_store=store, desktop=FakeDesktop(), verify_account=rotating_verify
     )
     assert (await tx.switch(profile)).success
-    assert store.read_profile(profile.codex_home) == b"verified-new-generation"
+    assert store.read_profile(profile.codex_home) == account_auth(generation=2)

@@ -8,7 +8,7 @@ from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.continuity.policy import AvailabilityFailoverPolicy
 from codex_account_manager.core.errors import SignInRequiredError
 from codex_account_manager.core.operation_lock import OperationLock
-from tests.fakes import FakeAppServer
+from tests.fakes import FakeAppServer, account_auth, account_identity
 from tests.unit.test_watcher import _health
 
 
@@ -17,8 +17,8 @@ async def test_shared_routing_error_preserves_active_identity_and_failure(migrat
 
     service = AccountService()
     profile = await service.create_profile("active")
-    await service.profiles.bind_account(profile.id, "active-id")
-    service.credentials.write_active_atomic(b'{"tokens":{"account_id":"active-id"}}')
+    await service.profiles.bind_account(profile.id, "active-id", user_id="test-user")
+    service.credentials.write_active_atomic(account_auth("active-id"))
     service.credentials.profile_auth_path(profile.codex_home).write_bytes(b"{}")
     healthy = await FakeAppServer(account_id="active-id").read_account()
 
@@ -59,8 +59,8 @@ async def test_rejected_profile_stays_rejected_until_credentials_change(migrated
 async def test_rejected_active_identity_is_preserved_without_trusting_saved_profile(migrated_db):
     service = AccountService()
     profile = await service.create_profile("active")
-    await service.profiles.bind_account(profile.id, "active-id")
-    service.credentials.write_active_atomic(b'{"tokens":{"account_id":"active-id"}}')
+    await service.profiles.bind_account(profile.id, "active-id", user_id="test-user")
+    service.credentials.write_active_atomic(account_auth("active-id"))
     service.read_snapshot = AsyncMock(side_effect=SignInRequiredError("rejected"))
     result = (await service.all_health())[0]
     assert result.is_active
@@ -142,8 +142,11 @@ async def test_expired_auth_can_check_idle_work_without_claiming_a_valid_login(
     server.read_account = AsyncMock(side_effect=SignInRequiredError("rejected"))
     monkeypatch.setattr(module, "CodexAppServer", lambda *a, **kw: server)
     service = ContinuityService()
-    service.accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source"}}')
-    assert await service._require_restart_safe("source") == "source"
+    service.accounts.credentials.write_active_atomic(account_auth("source"))
+    assert (
+        await service._require_restart_safe(account_identity("source").fingerprint)
+        == account_identity("source").fingerprint
+    )
     assert service._work_verified
 
 
@@ -198,11 +201,14 @@ async def test_rejected_source_can_escape_unreadable_history(migrated_db):
     from codex_account_manager.continuity.service import ContinuityService
 
     accounts = AccountService()
-    accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source"}}')
+    accounts.credentials.write_active_atomic(account_auth("source"))
     accounts.read_snapshot = AsyncMock(side_effect=SignInRequiredError("session rejected"))
     service = ContinuityService(accounts=accounts)
     service.observe_work = AsyncMock(side_effect=SignInRequiredError("routing rejected"))
-    assert await service._require_restart_safe("source") == "source"
+    assert (
+        await service._require_restart_safe(account_identity("source").fingerprint)
+        == account_identity("source").fingerprint
+    )
 
 
 async def test_routing_401_does_not_authorize_automatic_restart(migrated_db):
@@ -215,7 +221,7 @@ async def test_routing_401_does_not_authorize_automatic_restart(migrated_db):
         side_effect=AppServerError("workspace routing discovery unauthorized (401)")
     )
     accounts = AccountService()
-    accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source"}}')
+    accounts.credentials.write_active_atomic(account_auth("source"))
 
     async def read(*args, **kwargs):
         return await server.read_account()
@@ -237,7 +243,10 @@ async def test_unreadable_tracking_does_not_veto_fresh_exhausted_account(migrate
     )
     service = ContinuityService(accounts=accounts)
     service.observe_work = AsyncMock(side_effect=TimeoutError("history unavailable"))
-    assert await service._require_restart_safe("source") == "source"
+    assert (
+        await service._require_restart_safe(account_identity("source").fingerprint)
+        == account_identity("source").fingerprint
+    )
 
 
 async def test_manual_switch_survives_source_routing_401(migrated_db):
@@ -248,9 +257,9 @@ async def test_manual_switch_survives_source_routing_401(migrated_db):
 
     accounts = AccountService()
     target = await accounts.create_profile("target")
-    await accounts.profiles.bind_account(target.id, "target-id")
-    accounts.credentials.write_active_atomic(b'{"tokens":{"account_id":"source-id"}}')
-    accounts.active_account_id = AsyncMock(
+    await accounts.profiles.bind_account(target.id, "target-id", user_id="test-user")
+    accounts.credentials.write_active_atomic(account_auth("source-id"))
+    accounts.active_owner_key = AsyncMock(
         side_effect=AppServerError("workspace routing discovery unauthorized (401)")
     )
     service = ContinuityService(accounts=accounts)
@@ -288,8 +297,8 @@ async def test_expired_source_does_not_skip_target_refresh_check(migrated_db, mo
 
     profile = _profile(migrated_db, "target")
     service = AccountService()
-    service.credentials.write_active_atomic(b'{"tokens":{"account_id":"source"}}')
-    monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value=None))
+    service.credentials.write_active_atomic(account_auth("source"))
+    monkeypatch.setattr(AccountService, "_active_owner_key_safe", AsyncMock(return_value=None))
     monkeypatch.setattr(AccountService, "list_profiles", AsyncMock(return_value=[]))
     read = AsyncMock(side_effect=SignInRequiredError("rejected target"))
     monkeypatch.setattr(AccountService, "read_snapshot", read)
@@ -310,7 +319,7 @@ async def test_rejected_shared_session_does_not_quarantine_new_profile_login(mig
 
     service = AccountService()
     profile = await service.create_profile("active")
-    await service.profiles.bind_account(profile.id, "active-id")
+    await service.profiles.bind_account(profile.id, "active-id", user_id="test-user")
     service.credentials.write_active_atomic(
         b'{"tokens":{"account_id":"active-id","refresh_token":"old"}}'
     )

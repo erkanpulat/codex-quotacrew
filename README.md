@@ -4,13 +4,20 @@
 
 # QuotaCrew for Codex
 
-**Switch accounts. Keep work moving.**
+<img src="docs/images/hero-en.svg" width="1000" alt="Switch accounts. Keep creating. Account management, continuation and optional shutdown." />
 
-Your Codex accounts, remaining quotas and ongoing work in one window.
+**Switch accounts automatically. Keep unfinished work moving. Shut down when the job is done.**
 
-**[Download for Windows](https://github.com/erkanpulat/codex-quotacrew/releases/latest)** · [How it works](#continuation-flow) · [Get started](#get-started) · [Türkçe](README.tr.md)
+A free, open-source Windows account manager for Codex Desktop and VS Code. Manage accounts, quotas and work in one window; enable automatic continuation and optional shutdown to suit your workflow.
+
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download for Windows" /></a>
+<a href="#continuation-flow"><img src="docs/images/navigation/flow-en.svg" width="152" height="44" alt="How it works" /></a>
+<a href="#get-started"><img src="docs/images/navigation/setup-en.svg" width="140" height="44" alt="Get started" /></a>
+<a href="README.tr.md"><img src="docs/images/navigation/language-en.svg" width="112" height="44" alt="Türkçe" /></a>
 
 Windows · English / Türkçe · Light & dark themes · MIT
+
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=Total%20downloads&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="Total GitHub release asset downloads" /></a>
 
 </div>
 
@@ -28,13 +35,48 @@ Windows · English / Türkçe · Light & dark themes · MIT
 
 When a usage limit interrupts a task, finding an available account and returning to the right conversation takes time. **QuotaCrew brings those steps together:** compare quotas, choose how accounts switch, and request continuation of eligible conversations in Codex Desktop or VS Code.
 
-- **See your accounts at a glance.** Five-hour and weekly capacity, quota reset times, the active account and reset credits share one table. Overview and My accounts share search, filters, sorting and email-hiding controls, including subscription-period sorting.
-- **Choose how you switch.** Change accounts yourself, approve a suggestion or enable automatic switching to an available account when a limit is reached.
-- **Continue in the same conversation.** A continuation request carries the existing goal and instructions back to the interrupted conversation.
-- **Follow work and its results.** Jobs, Activity and the system tray show monitoring, continuation preferences and verified running-work counts.
-- **Fit your working routine.** Run in the tray, start with Windows or schedule shutdown when your chosen condition is met.
+<table>
+<tr>
+<td width="33%"><a href="#get-started"><img src="docs/images/feature-switch-en.svg" width="280" alt="Next account. Keep going.. See quotas in one window. Choose manual, confirmed or automatic switching. Add your accounts →" /></a></td>
+<td width="33%"><a href="#continuation-flow"><img src="docs/images/feature-continue-en.svg" width="280" alt="Keep the conversation. Open eligible goal chats. Send continuation requests to other supported work. Explore the flow →" /></a></td>
+<td width="33%"><a href="#let-your-computer-shut-down-when-work-is-done"><img src="docs/images/feature-power-en.svg" width="280" alt="Finish work. Power down.. Choose a task, quota or timer. Confirm your shutdown plan. Cancel it whenever you need. Explore shutdown →" /></a></td>
+</tr>
+</table>
+
+**Make it yours:** run in the tray, start with Windows and choose a light or dark theme. Follow results in Jobs and Activity.
 
 The plan badge can also show the subscription-period date recorded at sign-in when matching metadata is available. Hover over it for the last check and source; this is not a confirmed renewal or cancellation date.
+
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
+
+## Get started
+
+[![Download, choose preferences and add an account. Click to open Windows downloads.](docs/images/installation-en.svg)](https://github.com/erkanpulat/codex-quotacrew/releases/latest)
+
+**Python included · No Node.js required · Existing Codex history preserved**
+
+1. **Download and install.** Get `QuotaCrew-Setup-0.4.0.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, download `QuotaCrew-portable-0.4.0.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
+2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
+3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
+
+Version 0.4.0 upgrades the account database. Keep this version installed after upgrading; older versions cannot open the upgraded database. If an existing profile needs ownership verification, use **Verify account again** from its actions menu.
+
+<details>
+<summary>First-run screens and default preferences</summary>
+
+![Codex CLI check and optional installation](docs/images/setup-cli-en.png)
+
+![First-run monitoring, switching and continuation preferences](docs/images/setup-preferences-en.png)
+
+New installations select monitoring and automatic account switching. You can change preferences during setup or later in **Settings**. Switching restarts Codex Desktop; save your work first.
+
+Enable **Keep running in the tray** to continue monitoring after closing the window. **Pause** stops automatic switching, work tracking and continuation; account information continues refreshing at the configured interval (60 seconds by default). Starting with Windows is a separate preference. A cancelled sign-in can be retried from the account's actions menu.
+
+Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file checksums.
+
+</details>
+
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
 
 ## Continuation flow
 
@@ -61,9 +103,14 @@ Desktop uses its native local channel, IDE continuation connects to the existing
 
 You can use Codex Desktop and VS Code together. In VS Code, install **OpenAI's Codex extension** and open your conversation through that extension.
 
+<details>
+<summary>Illustration of the VS Code workflow</summary>
+
 ![Illustrative VS Code window with Codex chat and a continuation request on the left, and example code on the right](docs/images/ide-continuation-example.png)
 
 *AI-generated illustration of the continuation flow; this is not a live test screenshot.*
+
+</details>
 
 1. Open your local project and its Codex conversation in VS Code.
 2. In QuotaCrew, enable **Settings → Conversations → IDE continuation**.
@@ -87,31 +134,6 @@ QuotaCrew does not install a VS Code extension. **Open project in editor** opens
 
 </details>
 
-## Get started
-
-[![Download, choose preferences and add an account. Click to open Windows downloads.](docs/images/installation-en.svg)](https://github.com/erkanpulat/codex-quotacrew/releases/latest)
-
-**Python included · No Node.js required · Existing Codex history preserved**
-
-1. **Download and install.** Get `QuotaCrew-Setup-0.3.1.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, download `QuotaCrew-portable-0.3.1.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
-2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
-3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
-
-<details>
-<summary>First-run screens and default preferences</summary>
-
-![Codex CLI check and optional installation](docs/images/setup-cli-en.png)
-
-![First-run monitoring, switching and continuation preferences](docs/images/setup-preferences-en.png)
-
-New installations select monitoring and automatic account switching. You can change preferences during setup or later in **Settings**. Switching restarts Codex Desktop; save your work first.
-
-Enable **Keep running in the tray** to continue monitoring after closing the window. **Pause** stops automatic switching, work tracking and continuation; account information continues refreshing at the configured interval (60 seconds by default). Starting with Windows is a separate preference. A cancelled sign-in can be retried from the account's actions menu.
-
-Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file checksums.
-
-</details>
-
 ## Keep track of your work
 
 **Jobs** brings conversations, their accounts, work status and last-check times together. Select a row to inspect its Codex goal or continuation details. **Activity** shows the latest 50 account-switch results.
@@ -122,6 +144,12 @@ Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file
 </picture>
 
 Search local conversations by project, source, title or folder and open the project in your editor. `Ctrl+F` focuses search; `Ctrl+R` refreshes the page. **Clear tracking** clears QuotaCrew's observations and pauses monitoring; it preserves Codex conversation history. Stop a running conversation with Codex's own **Stop** action.
+
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
+
+## Let your computer shut down when work is done
+
+Leave a long task with Codex without waiting at your desk just to shut down the computer. Use account switching and continuation on their own, or add a shutdown plan when you need one.
 
 **Automatic shutdown** gives you three clear choices: finish a selected conversation, exhaust every saved account’s verified five-hour quota with no available account to switch to, or shut down after a set time. Work and limit conditions start a fixed **2-minute cancellation countdown** once verified and no other Codex work is active. The timer accepts **1–1440 minutes** (120 = two hours), including the final warning, and does not wait for work to finish. Plans require confirmation, last only for the current session and never forcibly close applications. [Shutdown conditions](docs/continuity.md#optional-windows-shutdown).
 
@@ -155,11 +183,21 @@ To offer users an update, publish a higher-version stable GitHub Release with it
 
 </details>
 
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
+
 ## Data and privacy
 
 Account profiles, settings and tracking records stay on your computer. Existing conversations remain in the shared `~/.codex` home; installation, updates and uninstalling QuotaCrew preserve that history. **System check** shows the data locations.
 
 QuotaCrew has no telemetry or credential proxy. Codex connects to OpenAI for sign-in and account information. On Windows, saved profile credentials and account-switch recovery data are encrypted with user-scoped DPAPI. A profile is temporarily decrypted while its Codex process runs; interrupted sessions are protected again on recovery. The shared Codex credential file and local SQLite metadata remain unencrypted with restricted access permissions. Diagnostic exports exclude credentials, databases and conversation text. Email addresses can be hidden in the interface. [Security and data protection](SECURITY.md).
+
+## Ready for your next task
+
+Download the Windows package, add your accounts and choose which steps to automate.
+
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download for Windows" /></a>
+
+---
 
 ## Development and contributions
 

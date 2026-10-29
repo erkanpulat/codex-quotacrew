@@ -6,7 +6,7 @@ import pytest
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.domain.models import ThreadInfo, ThreadRecord
 from codex_account_manager.storage.repositories import ThreadRepository
-from tests.fakes import FakeAppServer
+from tests.fakes import FakeAppServer, account_identity
 
 
 def thread(index, **values):
@@ -120,7 +120,7 @@ async def test_automatic_selection_excludes_newer_subagent(migrated_db, monkeypa
     from codex_account_manager.continuity.tracking import WorkTracker
 
     await WorkTracker().observe(
-        adapter.account_id,
+        account_identity(adapter.account_id).fingerprint,
         "thread-1",
         {"id": "limited", "status": "inProgress"},
         GoalInfo("thread-1", None, None, False),
@@ -129,7 +129,9 @@ async def test_automatic_selection_excludes_newer_subagent(migrated_db, monkeypa
     adapter.is_desktop_thread = AsyncMock(return_value=True)
     service.automation.native.latest_turn = adapter.observed_turn
     await service.observe_work()
-    assert (await WorkTracker().limited(adapter.account_id))[0][0] == "thread-1"
+    assert (await WorkTracker().limited(account_identity(adapter.account_id).fingerprint))[0][
+        0
+    ] == "thread-1"
     assert adapter.resume_calls == []
 
 

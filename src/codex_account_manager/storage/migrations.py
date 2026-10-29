@@ -260,6 +260,35 @@ async def _manual_goal_intent(db: aiosqlite.Connection) -> None:
     )
 
 
+async def _profile_user_identity(db: aiosqlite.Connection) -> None:
+    pending_columns = {
+        row[1]
+        for row in await (await db.execute("PRAGMA table_info(pending_continuations)")).fetchall()
+    }
+    if "owner_key" not in pending_columns:
+        await db.execute("ALTER TABLE pending_continuations ADD COLUMN owner_key TEXT")
+    await db.execute("UPDATE observed_work SET verified=0")
+    columns = {
+        row[1] for row in await (await db.execute("PRAGMA table_info(profile_accounts)")).fetchall()
+    }
+    if "user_id" in columns:
+        return
+    await db.execute("""CREATE TABLE profile_accounts_identity (
+        profile_id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        bound_at TEXT NOT NULL,
+        user_id TEXT CHECK(user_id IS NULL OR length(user_id) > 0),
+        FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE,
+        UNIQUE(account_id, user_id)
+    )""")
+    await db.execute("""INSERT INTO profile_accounts_identity (profile_id, account_id, bound_at)
+        SELECT profile_id, account_id, bound_at FROM profile_accounts""")
+    await db.execute("DROP TABLE profile_accounts")
+    await db.execute("ALTER TABLE profile_accounts_identity RENAME TO profile_accounts")
+    await db.execute("""CREATE UNIQUE INDEX profile_accounts_legacy_workspace
+        ON profile_accounts(account_id) WHERE user_id IS NULL""")
+
+
 MIGRATIONS: list[Migration] = [
     Migration(1, "initial application schema", _initial_schema),
     Migration(2, "durable automatic continuation attempts", _create_continuation_attempts),
@@ -270,6 +299,7 @@ MIGRATIONS: list[Migration] = [
     Migration(7, "preserve prepared continuation across process exits", _pending_continuations),
     Migration(8, "remember conversations awaiting revalidation", _unavailable_work_state),
     Migration(9, "preserve manually handed off active goals", _manual_goal_intent),
+    Migration(10, "distinguish users within a workspace", _profile_user_identity),
 ]
 
 TARGET_VERSION = MIGRATIONS[-1].version

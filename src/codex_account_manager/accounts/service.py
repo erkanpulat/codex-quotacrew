@@ -41,6 +41,7 @@ from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.paths import paths
 from codex_account_manager.core.protection import CredentialProtectionError
 from codex_account_manager.core.redaction import redact_text
+from codex_account_manager.domain.identity import AccountIdentity
 from codex_account_manager.domain.models import AccountSnapshot, Profile, ProfileHealth
 from codex_account_manager.domain.states import QuotaState
 from codex_account_manager.storage.repositories import ProfileRepository, SettingsRepository
@@ -64,6 +65,7 @@ def account_read_lock(codex_home: str | Path) -> OperationLock:
 def _default_factory(codex_home: str) -> AppServerAdapter:
     return CodexAppServer(
         codex_home,
+        experimental=True,
         refresh_on_unauthorized=Path(codex_home).resolve().parent == paths.profiles_dir.resolve(),
     )
 
@@ -88,7 +90,7 @@ class AccountService:
         self.profiles = profiles or ProfileRepository()
         self._factory = app_server_factory or _default_factory
         self.credentials = credential_store or FileCredentialStore()
-        self._last_health: dict[str, tuple[str | None, ProfileHealth]] = {}
+        self._last_health: dict[str, tuple[tuple[str, str, str] | None, ProfileHealth]] = {}
         self._health_task: asyncio.Task[list[ProfileHealth]] | None = None
 
     async def list_profiles(self) -> list[Profile]:
@@ -190,10 +192,20 @@ class AccountService:
     async def _bind_current_account(self, alias: str) -> str:
         profile = await self._require(alias)
         snapshot = await self.read_snapshot(profile.codex_home)
-        if not snapshot.account_id:
-            raise AccountMismatchError("Could not read an account id to bind.")
+        identity = snapshot.identity
+        if (
+            not snapshot.account_id
+            or not identity
+            or not identity.owner_key
+            or identity.workspace_id != snapshot.account_id
+        ):
+            raise AccountMismatchError(
+                "The user and workspace could not be verified. Check Codex or sign in again."
+            )
         try:
-            await self.profiles.bind_account(profile.id, snapshot.account_id)
+            await self.profiles.bind_account(
+                profile.id, snapshot.account_id, user_id=identity.user_id
+            )
         except sqlite3.IntegrityError as exc:
             raise ValueError("This account is already bound to another profile.") from exc
         return snapshot.account_id
@@ -210,8 +222,10 @@ class AccountService:
                     async with asyncio.timeout(ACCOUNT_READ_TIMEOUT):
                         await adapter.start()
                         if force_refresh and isinstance(adapter, CodexAppServer):
-                            return await adapter.read_account(force_refresh=True)
-                        return await adapter.read_account()
+                            return await adapter.read_account(
+                                force_refresh=True, include_identity=True
+                            )
+                        return await adapter.read_account(include_identity=True)
                 except TimeoutError as exc:
                     raise AppServerError("Account check timed out. Try refreshing again.") from exc
             finally:
@@ -249,6 +263,8 @@ class AccountService:
                     active = await self.read_snapshot(paths.shared_codex_home)
                     if not active.account_id and self.credentials.active_auth_path.exists():
                         raise AppServerError("The active account identity is unavailable.")
+            except OperationBusyError:
+                raise
             except SignInRequiredError as exc:
                 allow_refresh = not self.credentials.active_auth_path.exists()
                 active = None
@@ -257,27 +273,21 @@ class AccountService:
                 allow_refresh = not self.credentials.active_auth_path.exists()
                 active = None
                 active_error = exc
-            active_id = active.account_id if active else None
+            active_identity = active.identity if active else None
             if rejected_active is not None or active_error is not None:
-                active_id = self.credentials.active_account_hint()
+                active_identity = self.credentials.active_identity_hint()
             semaphore = asyncio.Semaphore(_MAX_CONCURRENT_READS)
             rejected = await SettingsRepository().all()
 
             async def checked(profile: Profile) -> ProfileHealth:
                 try:
-                    if (
-                        active_error is not None
-                        and active_id
-                        and profile.bound_account_id == active_id
-                    ):
+                    if active_error is not None and profile.identity.matches(active_identity):
                         return self._failed_health(
-                            profile, active_error, active_account_id=active_id
+                            profile,
+                            active_error,
+                            active_identity=active_identity,
                         )
-                    if (
-                        rejected_active is not None
-                        and active_id
-                        and profile.bound_account_id == active_id
-                    ):
+                    if rejected_active is not None and profile.identity.matches(active_identity):
                         if (
                             self.credentials.profile_auth_path(profile.codex_home).exists()
                             and self.credentials.read_active()
@@ -285,7 +295,9 @@ class AccountService:
                         ):
                             await self.reject_profile(profile)
                         return self._failed_health(
-                            profile, rejected_active, active_account_id=active_id
+                            profile,
+                            rejected_active,
+                            active_identity=active_identity,
                         )
                     fingerprint = rejected.get(f"rejected_auth:{profile.id}")
                     if fingerprint and fingerprint == self._credential_fingerprint(profile):
@@ -294,16 +306,16 @@ class AccountService:
                             SignInRequiredError(
                                 "Codex rejected this sign-in. Sign in again in Accounts."
                             ),
-                            active_account_id=active_id,
+                            active_identity=active_identity,
                         )
                     return await self._health_for(
                         profile,
-                        active_account_id=active_id,
+                        active_identity=active_identity,
                         active_snapshot=active,
                         allow_refresh=allow_refresh,
                     )
                 except Exception as exc:
-                    return self._failed_health(profile, exc, active_account_id=active_id)
+                    return self._failed_health(profile, exc, active_identity=active_identity)
 
             async def bounded(profile: Profile) -> ProfileHealth:
                 async with semaphore:
@@ -315,21 +327,19 @@ class AccountService:
         except OperationBusyError:
             raise
         except Exception as exc:
-            return [self._failed_health(p, exc, active_account_id=None) for p in profiles]
+            return [self._failed_health(p, exc) for p in profiles]
 
     async def _health_for(
         self,
         profile: Profile,
         *,
-        active_account_id: str | None,
+        active_identity: AccountIdentity | None = None,
         active_snapshot: AccountSnapshot | None = None,
         allow_refresh: bool = True,
     ) -> ProfileHealth:
         auth_present = self.credentials.profile_auth_path(profile.codex_home).exists()
         try:
-            is_active = bool(
-                profile.bound_account_id and profile.bound_account_id == active_account_id
-            )
+            is_active = profile.identity.matches(active_identity)
             snapshot = (
                 active_snapshot
                 if is_active and active_snapshot
@@ -343,56 +353,95 @@ class AccountService:
                 raise AppServerError(
                     "Codex did not return an account identity. Try checking again."
                 )
+            profile = await self._upgrade_legacy_profile(profile, snapshot)
+            is_active = profile.identity.matches(active_identity)
             decision = evaluate_quota(snapshot)
+            if profile.bound_account_id and (
+                not snapshot.identity
+                or not snapshot.identity.owner_key
+                or snapshot.identity.workspace_id != snapshot.account_id
+            ):
+                raise AppServerError(
+                    "The user and workspace could not be verified. Check Codex or sign in again."
+                )
             match = (
                 None
-                if not profile.bound_account_id
-                else profile.bound_account_id == snapshot.account_id
+                if not profile.identity.owner_key
+                else profile.identity.matches(snapshot.identity)
             )
             health = ProfileHealth(
                 alias=profile.alias,
                 profile_id=profile.id,
-                plan_type=snapshot.plan_type,
+                plan_type=snapshot.plan_type if match is True else None,
                 subscription_until=snapshot.subscription_until if match is True else None,
                 subscription_checked_at=snapshot.subscription_checked_at if match is True else None,
                 email=snapshot.email if match is True else None,
                 reset_credits=snapshot.reset_credits if match is True else None,
-                primary_used_percent=snapshot.primary_used_percent,
-                secondary_used_percent=snapshot.secondary_used_percent,
-                primary_window_minutes=snapshot.primary_window_minutes,
-                secondary_window_minutes=snapshot.secondary_window_minutes,
-                primary_resets_at=snapshot.primary_resets_at,
-                secondary_resets_at=snapshot.secondary_resets_at,
-                ordinary_usage_allowed=snapshot.ordinary_usage_allowed,
+                primary_used_percent=snapshot.primary_used_percent if match is True else None,
+                secondary_used_percent=snapshot.secondary_used_percent if match is True else None,
+                primary_window_minutes=snapshot.primary_window_minutes if match is True else None,
+                secondary_window_minutes=snapshot.secondary_window_minutes
+                if match is True
+                else None,
+                primary_resets_at=snapshot.primary_resets_at if match is True else None,
+                secondary_resets_at=snapshot.secondary_resets_at if match is True else None,
+                ordinary_usage_allowed=snapshot.ordinary_usage_allowed if match is True else None,
                 auth_present=auth_present,
                 account_match=match,
                 is_active=is_active,
-                quota_state=decision.state,
+                quota_state=decision.state if match is True else QuotaState.UNKNOWN,
                 last_checked_at=datetime.now(UTC),
+                identity=snapshot.identity,
+                error="This saved profile needs user verification. Sign in again to confirm its owner."
+                if profile.bound_account_id and not profile.bound_user_id
+                else None,
             )
             if match is True:
-                self._last_health[profile.id] = (profile.bound_account_id, health)
+                self._last_health[profile.id] = (profile.identity.owner_key, health)
             else:
                 self._last_health.pop(profile.id, None)
             return health
         except Exception as exc:
-            return self._failed_health(profile, exc, active_account_id=active_account_id)
+            return self._failed_health(profile, exc, active_identity=active_identity)
+
+    async def _upgrade_legacy_profile(self, profile: Profile, snapshot: AccountSnapshot) -> Profile:
+        identity = snapshot.identity
+        if (
+            profile.bound_user_id
+            or not profile.bound_account_id
+            or snapshot.plan_type not in {"free", "plus", "pro"}
+            or not identity
+            or not identity.owner_key
+            or identity.workspace_id != profile.bound_account_id
+            or snapshot.account_id != profile.bound_account_id
+        ):
+            return profile
+        try:
+            with OperationLock(paths.data_dir / "account-operation.lock"):
+                upgraded = await self.profiles.upgrade_legacy_identity(profile, identity)
+                if upgraded:
+                    return profile.model_copy(update={"bound_user_id": identity.user_id})
+        except OperationBusyError:
+            pass
+        return profile
 
     def _failed_health(
-        self, profile: Profile, error: Exception, *, active_account_id: str | None
+        self,
+        profile: Profile,
+        error: Exception,
+        *,
+        active_identity: AccountIdentity | None = None,
     ) -> ProfileHealth:
         auth_present = self.credentials.profile_auth_path(profile.codex_home).exists()
         reauth = isinstance(error, SignInRequiredError)
         cached = self._last_health.get(profile.id)
-        previous = cached[1] if cached and cached[0] == profile.bound_account_id else None
+        previous = cached[1] if cached and cached[0] == profile.identity.owner_key else None
         if previous and auth_present and not reauth:
             return replace(
                 previous,
                 alias=profile.alias,
                 stale=True,
-                is_active=bool(
-                    profile.bound_account_id and profile.bound_account_id == active_account_id
-                ),
+                is_active=profile.identity.matches(active_identity),
                 quota_state=QuotaState.UNKNOWN,
                 ordinary_usage_allowed=None,
                 error=redact_text(str(error)),
@@ -409,32 +458,30 @@ class AccountService:
             ordinary_usage_allowed=None,
             auth_present=auth_present,
             account_match=None,
-            is_active=bool(
-                profile.bound_account_id and profile.bound_account_id == active_account_id
-            ),
+            is_active=profile.identity.matches(active_identity),
             quota_state=QuotaState.UNKNOWN,
             last_checked_at=None,
             error=redact_text(str(error)),
             reauth_required=reauth,
         )
 
-    async def active_account_id(self) -> str | None:
-        """Account id currently active in the shared home."""
+    async def active_owner_key(self) -> str | None:
         snapshot = await self.read_snapshot(paths.shared_codex_home)
-        return snapshot.account_id
+        return snapshot.identity.fingerprint if snapshot.identity else None
 
-    async def _active_account_id_safe(self) -> str | None:
+    async def _active_owner_key_safe(self) -> str | None:
         try:
-            return await self.active_account_id()
+            return await self.active_owner_key()
         except Exception:
             return None
 
     async def resolve_active_alias(self) -> str | None:
-        active_id = await self._active_account_id_safe()
-        if not active_id:
+        try:
+            snapshot = await self.read_snapshot(paths.shared_codex_home)
+        except Exception:
             return None
         for profile in await self.profiles.list():
-            if profile.bound_account_id == active_id:
+            if profile.identity.matches(snapshot.identity):
                 return profile.alias
         return None
 

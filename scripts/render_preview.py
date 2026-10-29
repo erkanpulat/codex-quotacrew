@@ -15,7 +15,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSignalBlocker, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QDialog
 
-from codex_account_manager.continuity.tracking import ObservedWork, account_hash
+from codex_account_manager.continuity.tracking import ObservedWork
+from codex_account_manager.domain.identity import AccountIdentity, IdentityState
 from codex_account_manager.domain.models import (
     ProfileHealth,
     ResetCredit,
@@ -40,6 +41,11 @@ def sample_profiles() -> list[ProfileHealth]:
         ProfileHealth(
             alias=name,
             profile_id=name,
+            identity=AccountIdentity(
+                user_id=f"preview-{name.lower().replace(' ', '-')}",
+                workspace_id="preview-workspace",
+                state=IdentityState.COMPLETE,
+            ),
             email=name.lower().replace(" ", ".") + "@example.com",
             plan_type=plan,
             primary_used_percent=primary,
@@ -357,7 +363,11 @@ def render() -> None:
     card.deleteLater()
     window.nav.setCurrentRow(2)
     window.conversations._render_threads(sample_threads())
-    source_account = account_hash("preview-personal-account")
+    source_account = AccountIdentity(
+        user_id="preview-user",
+        workspace_id="preview-personal-account",
+        state=IdentityState.COMPLETE,
+    ).fingerprint
     window.conversations._render_tracking(
         (
             [

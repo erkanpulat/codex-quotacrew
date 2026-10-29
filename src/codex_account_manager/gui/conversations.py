@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from codex_account_manager.continuity.tracking import ObservedWork, WorkTracker, account_hash
+from codex_account_manager.continuity.tracking import ObservedWork, WorkTracker
 from codex_account_manager.core.events import bus
 from codex_account_manager.domain.models import ThreadRecord
 from codex_account_manager.gui.async_runner import AsyncRunner
@@ -433,13 +433,11 @@ class ConversationsView(BaseView):
     async def _tracking_snapshot() -> tuple[list[ObservedWork], dict[str, str]]:
         from codex_account_manager.adapters.credential_store import FileCredentialStore
 
-        account_id = FileCredentialStore().active_account_hint()
-        tracked = await WorkTracker().visible() if account_id else []
+        owner_key = FileCredentialStore().active_identity_hint().fingerprint
+        tracked = await WorkTracker().visible() if owner_key else []
         profiles = await ProfileRepository().list()
         names = {
-            account_hash(profile.bound_account_id): profile.alias
-            for profile in profiles
-            if profile.bound_account_id
+            key: profile.alias for profile in profiles if (key := profile.identity.fingerprint)
         }
         return tracked, names
 

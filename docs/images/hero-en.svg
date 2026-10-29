@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="290" viewBox="0 0 1000 290" role="img" aria-labelledby="title desc">
+<title id="title">QuotaCrew — Switch accounts. Keep creating.</title><desc id="desc">Less waiting. More progress with Codex.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#161e28"/><stop offset="1" stop-color="#0f141b"/></linearGradient></defs>
+<rect x="1" y="1" width="998" height="288" rx="24" fill="url(#bg)" stroke="#2b394a"/>
+<path d="M740 1 600 289M850 1 710 289M960 1 820 289" stroke="#2681f4" stroke-opacity=".12" stroke-width="2"/>
+<circle cx="916" cy="65" r="8" fill="#31d4a1"/><circle cx="916" cy="65" r="19" fill="none" stroke="#31d4a1" stroke-opacity=".2" stroke-width="8"/>
+<g font-family="Segoe UI,Arial,sans-serif">
+<text x="44" y="51" fill="#31d4a1" font-size="14" letter-spacing="3" font-weight="700">QUOTACREW / CODEX</text>
+<text x="44" y="111" fill="#edf2f7" font-size="38" font-weight="700">Switch accounts. Keep creating.</text>
+<text x="44" y="149" fill="#a7b4c7" font-size="19">Less waiting. More progress with Codex.</text>
+<rect x="44" y="193" width="287" height="56" rx="12" fill="#1e2936" stroke="#2b394a"/>
+<text x="61" y="228" fill="#2681f4" font-size="17" font-weight="700">01</text>
+<text x="97" y="228" fill="#edf2f7" font-size="17">Manage accounts</text>
+<rect x="349" y="193" width="287" height="56" rx="12" fill="#1e2936" stroke="#2b394a"/>
+<text x="366" y="228" fill="#31d4a1" font-size="17" font-weight="700">02</text>
+<text x="402" y="228" fill="#edf2f7" font-size="17">Continue the work</text>
+<rect x="654" y="193" width="287" height="56" rx="12" fill="#1e2936" stroke="#2b394a"/>
+<text x="671" y="228" fill="#f5ad36" font-size="17" font-weight="700">03</text>
+<text x="707" y="228" fill="#edf2f7" font-size="17">Shut down when done</text>
+</g></svg>

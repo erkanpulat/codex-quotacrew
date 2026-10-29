@@ -11,6 +11,7 @@ from codex_account_manager.continuity.policy import (
 )
 from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.domain.states import QuotaState, SwitchPolicyKind
+from tests.fakes import account_identity
 
 
 def _health(
@@ -26,6 +27,7 @@ def _health(
     return ProfileHealth(
         alias=alias,
         profile_id=alias,
+        identity=account_identity(alias),
         plan_type="plus",
         primary_used_percent=primary,
         secondary_used_percent=secondary,

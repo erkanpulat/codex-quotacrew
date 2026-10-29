@@ -9,6 +9,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QTableWidgetItem, QWidget
 
 from codex_account_manager.continuity.service import ContinuityService
+from codex_account_manager.core.redaction import redact_text
 from codex_account_manager.gui.design import DARK, make_icon
 from codex_account_manager.gui.i18n import state_label, tr
 from codex_account_manager.gui.view_base import (
@@ -145,6 +146,9 @@ class ActivityView(BaseView):
                         else (DARK.success if handoff.success else DARK.danger)
                     )
                     item.setForeground(QBrush(QColor(color)))
+                    detail = getattr(handoff, "detail", None)
+                    if detail:
+                        item.setToolTip(tr(redact_text(detail)))
                 self.table.setItem(row, column, item)
         self.table.setSortingEnabled(True)
         self._filter()

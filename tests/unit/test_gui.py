@@ -2114,6 +2114,8 @@ def test_activity_shows_account_handoff_and_elapsed_time(window):
         "private-value" not in view.table.item(0, column).text()
         for column in range(view.table.columnCount())
     )
+    assert view.table.item(0, 3).toolTip()
+    assert "private-value" not in view.table.item(0, 3).toolTip()
 
 
 def test_work_details_are_optional_and_list_keeps_all_columns(window):

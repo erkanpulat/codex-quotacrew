@@ -46,11 +46,9 @@ class Watcher:
         self._wake = asyncio.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop = asyncio.Event()
-        self._failed_switch: tuple[str | None, str] | None = None
-        self._retry_at = 0.0
-        self._retry_delay = 300.0
+        self._failed_switches: dict[tuple[str | None, str], tuple[float, float]] = {}
         self._manual_refresh = False
-        self._last_account_id: str | None = None
+        self._last_owner_key: str | None = None
 
     def stop(self) -> None:
         def signal() -> None:
@@ -79,27 +77,28 @@ class Watcher:
                 self.policy = resolve_policy(SwitchPolicyKind.MANUAL)
         health = await self.accounts.all_health()
         bus.publish("health.updated", count=len(health), health=health)
-        account_id = None
+        owner_key = None
         observed = False
         if track_work:
             try:
-                account_id = await self.continuity.observe_work()
+                owner_key = await self.continuity.observe_work()
                 observed = True
                 bus.publish("work.observed")
             except Exception:
                 log.warning("Conversation tracking could not be refreshed.")
-        account_changed = (
-            self._last_account_id is not None
-            and account_id is not None
-            and account_id != self._last_account_id
+        current = next((h for h in health if h.is_active), None)
+        health_owner = current.identity.fingerprint if current and current.identity else None
+        account_changed = bool(owner_key and health_owner and owner_key != health_owner) or (
+            self._last_owner_key is not None
+            and owner_key is not None
+            and owner_key != self._last_owner_key
         )
-        if account_id is not None:
-            self._last_account_id = account_id
+        if owner_key is not None:
+            self._last_owner_key = owner_key
         if allow_switch and not account_changed:
-            current = next((h for h in health if h.is_active), None)
             if observed and current is not None and SwitchPolicy._is_available(current):
                 try:
-                    await self.continuity.automation.recover_pending(account_id)
+                    await self.continuity.automation.recover_pending(owner_key)
                 except Exception:
                     log.warning("Prepared continuation could not be recovered.")
                     bus.publish("continuation.status", state="needs_user", stage="recovery")
@@ -116,11 +115,23 @@ class Watcher:
         if automation is not None and automation.tasks:
             return
         current = next((h for h in health if h.is_active), None)
-        decision = self.policy.decide(current, health)
+        source = current.profile_id if current else None
+        targets = {h.profile_id for h in health}
+        self._failed_switches = {
+            key: retry
+            for key, retry in self._failed_switches.items()
+            if key[0] == source and key[1] in targets
+        }
+        if not SwitchPolicy._current_limited(current):
+            self._failed_switches.clear()
+        now = time.monotonic()
+        candidates = [
+            h
+            for h in health
+            if now >= self._failed_switches.get((source, h.profile_id), (0.0, 300.0))[0]
+        ]
+        decision = self.policy.decide(current, candidates)
         if not decision.should_switch or decision.target is None:
-            self._failed_switch = None
-            self._retry_at = 0.0
-            self._retry_delay = 300.0
             return
         if decision.requires_confirmation:
             bus.publish(
@@ -130,16 +141,7 @@ class Watcher:
             )
             log.info("Switch suggested: %s", decision.reason)
             return
-        # Avoid repeatedly restarting Desktop every poll after a failed switch.
-        key = (current.profile_id if current else None, decision.target.profile_id)
-        if self._failed_switch != key:
-            self._failed_switch = None
-            self._retry_at = 0.0
-            self._retry_delay = 300.0
-        if time.monotonic() < self._retry_at:
-            return
         health_reader = getattr(self.accounts, "health", None)
-        candidates = list(health)
         while health_reader is not None:
             try:
                 target_health = await health_reader(decision.target.alias)
@@ -161,11 +163,9 @@ class Watcher:
                     detail="No target account passed the fresh availability check.",
                 )
                 return
-            key = (current.profile_id if current else None, decision.target.profile_id)
-            if self._failed_switch == key and time.monotonic() < self._retry_at:
-                return
         if decision.target is None:
             return
+        key = (source, decision.target.profile_id)
         log.info("Policy failover: %s", decision.reason)
         try:
             if current is not None and current.reauth_required:
@@ -175,17 +175,14 @@ class Watcher:
                 )
             else:
                 await self.continuity.continue_on_limit(decision.target.alias)
-            self._failed_switch = None
-            self._retry_at = 0.0
-            self._retry_delay = 300.0
+            self._failed_switches.clear()
             bus.publish("switch.completed", target=decision.target.alias)
         except (HandoffDeferredError, OperationBusyError) as exc:
             log.info("Automatic handoff deferred: %s", exc)
             bus.publish("switch.deferred", detail=str(exc))
         except Exception as exc:
-            self._failed_switch = key
-            self._retry_at = time.monotonic() + self._retry_delay
-            self._retry_delay = min(self._retry_delay * 2, 1800.0)
+            delay = self._failed_switches.get(key, (0.0, 300.0))[1]
+            self._failed_switches[key] = (time.monotonic() + delay, min(delay * 2, 1800.0))
             log.warning("Automatic failover failed: %s", exc)
             from codex_account_manager.core.redaction import redact_text
 
@@ -208,6 +205,7 @@ class Watcher:
             while not self._stop.is_set():
                 self._wake.clear()
                 started = time.monotonic()
+                retry_delay = None
                 enabled = False
                 try:
                     from codex_account_manager.storage.repositories import SettingsRepository
@@ -221,13 +219,18 @@ class Watcher:
                         await self.continuity.automation.stop(clear_pending=True)
                     await self.poll_once(allow_switch=enabled, track_work=enabled or requested)
                 except OperationBusyError:
+                    retry_delay = 2.0
                     log.debug("Account refresh deferred until the current operation completes.")
                 except Exception:
                     log.exception("Watcher poll failed.")
                 try:
                     await asyncio.wait_for(
                         self._wake.wait(),
-                        timeout=max(1.0, self.poll_seconds - (time.monotonic() - started)),
+                        timeout=(
+                            retry_delay
+                            if retry_delay is not None
+                            else max(1.0, self.poll_seconds - (time.monotonic() - started))
+                        ),
                     )
                 except TimeoutError:
                     pass

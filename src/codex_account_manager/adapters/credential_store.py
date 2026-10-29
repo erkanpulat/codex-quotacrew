@@ -7,15 +7,16 @@ in the official client's file format; it is not an application-owned vault.
 
 from __future__ import annotations
 
-import json
 import tomllib
 from pathlib import Path
 
+from codex_account_manager.adapters.auth_identity import auth_evidence, read_auth_evidence
 from codex_account_manager.core import protection
 from codex_account_manager.core.errors import AccountMismatchError
 from codex_account_manager.core.files import atomic_write, restrict_access
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.paths import paths
+from codex_account_manager.domain.identity import AccountIdentity
 
 _AUTH_FILE = "auth.json"
 _FILE_AUTH_SETTING = 'cli_auth_credentials_store = "file"'
@@ -150,12 +151,8 @@ class FileCredentialStore:
         path = self.active_auth_path
         return path.read_bytes() if path.exists() else None
 
-    def active_account_hint(self) -> str | None:
-        try:
-            account_id = json.loads(self.read_active() or b"{}").get("tokens", {}).get("account_id")
-            return account_id if isinstance(account_id, str) and account_id else None
-        except (OSError, ValueError, AttributeError, TypeError):
-            return None
+    def active_identity_hint(self) -> AccountIdentity:
+        return read_auth_evidence(self.shared_home).identity
 
     def write_active_atomic(self, data: bytes) -> None:
         atomic_write(self.active_auth_path, data)
@@ -180,21 +177,14 @@ class FileCredentialStore:
         self.write_active_atomic(data)
 
     def sync_active_to_profile(
-        self, codex_home: str | Path, *, expected_account_id: str | None = None
+        self, codex_home: str | Path, *, expected_identity: AccountIdentity
     ) -> None:
         """Persist the current active auth back into a profile (atomic)."""
         active = self.read_active()
         if active is None:
             return
-        if expected_account_id is not None:
-            try:
-                account_id = json.loads(active)["tokens"]["account_id"]
-            except (ValueError, KeyError, TypeError):
-                account_id = None
-            if account_id != expected_account_id:
-                raise AccountMismatchError(
-                    "The active credentials changed before they could be saved."
-                )
+        if not expected_identity.matches(auth_evidence(active).identity):
+            raise AccountMismatchError("The active credentials changed before they could be saved.")
         if not managed_home(codex_home):
             raise protection.CredentialProtectionError(
                 "Profile is outside managed account storage."

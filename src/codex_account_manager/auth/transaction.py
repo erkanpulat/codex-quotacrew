@@ -12,12 +12,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from codex_account_manager.adapters.auth_identity import auth_evidence
 from codex_account_manager.adapters.credential_store import FileCredentialStore
 from codex_account_manager.adapters.desktop import WindowsDesktopLauncher
 from codex_account_manager.adapters.interfaces import DesktopLauncher
 from codex_account_manager.core import protection
 from codex_account_manager.core.errors import (
     AccountMismatchError,
+    AppServerError,
     OperationBusyError,
     SignInRequiredError,
     TransactionError,
@@ -28,6 +30,7 @@ from codex_account_manager.core.logging import get_logger
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.paths import paths
 from codex_account_manager.core.redaction import redact_text
+from codex_account_manager.domain.identity import AccountIdentity
 from codex_account_manager.domain.models import Profile
 from codex_account_manager.domain.states import TransactionStage
 
@@ -42,6 +45,7 @@ class SwitchResult:
     rolled_back: bool = False
     account_id: str | None = None
     detail: str | None = None
+    identity: AccountIdentity | None = None
 
 
 @dataclass
@@ -190,7 +194,6 @@ class AuthTransaction:
         self,
         target: Profile,
         *,
-        after_switch: Callable[[], Awaitable[None]] | None = None,
         before_desktop_stop: Callable[[], Awaitable[None]] | None = None,
     ) -> SwitchResult:
         async with OperationLock(paths.data_dir / "account-operation.lock").wait(
@@ -198,20 +201,18 @@ class AuthTransaction:
         ):
             if self.recovery_path.exists():
                 self._restore()
-            return await self._switch_locked(
-                target, after_switch=after_switch, before_desktop_stop=before_desktop_stop
-            )
+            return await self._switch_locked(target, before_desktop_stop=before_desktop_stop)
 
     async def _switch_locked(
         self,
         target: Profile,
         *,
-        after_switch: Callable[[], Awaitable[None]] | None,
         before_desktop_stop: Callable[[], Awaitable[None]] | None = None,
     ) -> SwitchResult:
-        if not target.bound_account_id:
+        if not target.identity.owner_key:
             raise TransactionError(
-                f"Profile '{target.alias}' is not bound to an account.", stage="prepare"
+                "This saved profile needs user verification. Sign in again to confirm its owner.",
+                stage="prepare",
             )
         source = self.credentials.profile_auth_path(target.codex_home)
         if not source.is_file():
@@ -240,30 +241,39 @@ class AuthTransaction:
             )
 
             service = AccountService(credential_store=self.credentials)
-            active_id = await service._active_account_id_safe()
-            source_hint = active_id or self.credentials.active_account_hint()
+            try:
+                active_snapshot = await service.read_snapshot(self.credentials.shared_home)
+                active_identity = active_snapshot.identity or AccountIdentity()
+            except Exception:
+                active_identity = AccountIdentity()
+            source_hint = self.credentials.active_identity_hint()
             for profile in await service.list_profiles():
-                if active_id and profile.bound_account_id == active_id:
+                if profile.identity.matches(active_identity):
                     source_profile = profile
                     async with account_read_lock(profile.codex_home).wait(
                         timeout=ACCOUNT_READ_TIMEOUT
                     ):
                         self.credentials.sync_active_to_profile(
-                            profile.codex_home, expected_account_id=profile.bound_account_id
+                            profile.codex_home, expected_identity=profile.identity
                         )
                     break
             try:
-                account_id = await self._verify(
+                identity = await self._verify(
                     self.credentials.shared_home
-                    if active_id == target.bound_account_id
+                    if target.identity.matches(active_identity)
                     else Path(target.codex_home),
-                    force_refresh=bool(source_hint and source_hint != target.bound_account_id)
+                    force_refresh=bool(
+                        source_hint.owner_key and not target.identity.matches(source_hint)
+                    )
                     or not self.credentials.active_auth_path.exists(),
                 )
             except SignInRequiredError:
                 await service.reject_profile(target)
                 raise
-            if account_id != target.bound_account_id:
+            if not target.identity.matches(identity):
+                log.warning(
+                    "Account switch rejected before activation: verified target owner differs."
+                )
                 raise AccountMismatchError("Profile credentials no longer match its bound account.")
         from codex_account_manager.accounts.service import ACCOUNT_READ_TIMEOUT, account_read_lock
 
@@ -278,7 +288,6 @@ class AuthTransaction:
             return await self._activate(
                 target,
                 source_profile,
-                after_switch=after_switch,
                 before_desktop_stop=before_desktop_stop,
             )
 
@@ -287,12 +296,13 @@ class AuthTransaction:
         target: Profile,
         source_profile: Profile | None,
         *,
-        after_switch: Callable[[], Awaitable[None]] | None,
         before_desktop_stop: Callable[[], Awaitable[None]] | None,
     ) -> SwitchResult:
         new_auth = self.credentials.read_profile(target.codex_home)
         if not new_auth:
             raise TransactionError("Profile credentials are empty.", stage="prepare")
+        if not target.identity.matches(auth_evidence(new_auth).identity):
+            raise AccountMismatchError("Profile credentials no longer match its bound account.")
         if before_desktop_stop is not None:
             await before_desktop_stop()
         journal = _Journal(profile_id=target.id, profile_alias=target.alias)
@@ -316,11 +326,11 @@ class AuthTransaction:
                 self.desktop.stop()
             if source_profile is not None:
                 # Preserve any credential rotation during Desktop shutdown.
-                source_id = await self._verify(self.credentials.shared_home)
-                if source_id != source_profile.bound_account_id:
+                source_identity = await self._verify(self.credentials.shared_home)
+                if not source_profile.identity.matches(source_identity):
                     raise AccountMismatchError("The source account changed during handoff.")
                 self.credentials.sync_active_to_profile(
-                    source_profile.codex_home, expected_account_id=source_profile.bound_account_id
+                    source_profile.codex_home, expected_identity=source_profile.identity
                 )
                 if source_profile.id == target.id:
                     new_auth = self.credentials.read_profile(target.codex_home)
@@ -329,27 +339,28 @@ class AuthTransaction:
             stage(TransactionStage.ATOMIC_REPLACE)
             self.credentials.write_active_atomic(new_auth)
             stage(TransactionStage.VERIFY_ACCOUNT)
-            account_id = await self._verify(self.credentials.shared_home)
-            if account_id != target.bound_account_id:
+            identity = await self._verify(self.credentials.shared_home)
+            if not target.identity.matches(identity):
                 raise AccountMismatchError(
                     "Activated auth does not match the profile's bound account."
                 )
-            self.credentials.sync_active_to_profile(target.codex_home)
+            self.credentials.sync_active_to_profile(
+                target.codex_home, expected_identity=target.identity
+            )
             if self.launch_desktop:
                 stage(TransactionStage.START_DESKTOP)
                 self.desktop.launch()
                 stage(TransactionStage.WAIT_READY)
                 if not await self.desktop.wait_ready(self.wait_ready_timeout):
                     raise TransactionError("Desktop readiness timed out.", stage="wait_ready")
-            if after_switch is not None:
-                stage(TransactionStage.RESUME_THREAD)
-                await after_switch()
             stage(TransactionStage.COMMIT)
             # Deleting the snapshot is the commit point; no fallible work follows.
             self.recovery_path.unlink()
             snapshot_written = False
             journal.clear()
-            return SwitchResult(True, TransactionStage.COMMIT, account_id=account_id)
+            return SwitchResult(
+                True, TransactionStage.COMMIT, account_id=identity.workspace_id, identity=identity
+            )
         except (Exception, asyncio.CancelledError) as exc:
             detail = redact_text(str(exc)) or "Account switch cancelled."
             rolled_back = False
@@ -376,7 +387,7 @@ class AuthTransaction:
                 detail, stage=current_stage.value, rolled_back=rolled_back
             ) from exc
 
-    async def _verify(self, codex_home: Path, *, force_refresh: bool = False) -> str | None:
+    async def _verify(self, codex_home: Path, *, force_refresh: bool = False) -> AccountIdentity:
         if self._verify_account is not None:
             return await self._verify_account(str(codex_home))
         from codex_account_manager.accounts.service import ACCOUNT_READ_TIMEOUT, AccountService
@@ -387,7 +398,18 @@ class AuthTransaction:
                 snapshot = await AccountService().read_snapshot(
                     codex_home, force_refresh=force_refresh
                 )
-                return snapshot.account_id
+                identity = snapshot.identity or AccountIdentity()
+                if identity.owner_key is None or identity.workspace_id != snapshot.account_id:
+                    log.warning(
+                        "Account verification unavailable: identity_state=%s, scope_matches=%s, force_refresh=%s.",
+                        identity.state.value,
+                        identity.workspace_id == snapshot.account_id,
+                        force_refresh,
+                    )
+                    raise AppServerError(
+                        "The user and workspace could not be verified. Check Codex or sign in again."
+                    )
+                return identity
             except OperationBusyError:
                 if asyncio.get_running_loop().time() >= deadline:
                     raise

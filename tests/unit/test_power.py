@@ -13,6 +13,7 @@ from codex_account_manager.monitoring.power import (
     all_accounts_limited,
     work_finished,
 )
+from tests.fakes import account_identity
 from tests.unit.test_watcher import _health as watcher_health
 
 
@@ -464,7 +465,10 @@ async def test_many_old_conversations_do_not_block_shutdown_but_one_running_does
     assert not (await checks.check(PowerTarget("limits"))).ready
 
 
-async def test_completed_work_waits_for_pending_independent_continuation(migrated_db, monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_completed_work_waits_for_pending_independent_continuation(
+    migrated_db, monkeypatch, legacy
+):
     from unittest.mock import AsyncMock
 
     from codex_account_manager.continuity.automation import (
@@ -480,7 +484,12 @@ async def test_completed_work_waits_for_pending_independent_continuation(migrate
     monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
     checks = power.PowerChecks(AsyncMock())
     checks._turn = AsyncMock(return_value={"id": "complete", "status": "completed"})
-    ticket = ContinuationTicket("other", "stopped", "acc-1")
+    ticket = ContinuationTicket(
+        "other",
+        "stopped",
+        "acc-1",
+        owner_key=None if legacy else account_identity("acc-1").fingerprint,
+    )
     supervisor = ContinuationSupervisor()
     await supervisor.save_pending([ticket])
     target = PowerTarget("work", "thread", None, "original")
@@ -514,7 +523,13 @@ async def test_pending_goal_activation_blocks_conditional_shutdown(
     checks = power.PowerChecks(accounts)
     checks._turn = AsyncMock(return_value={"id": "complete", "status": "completed"})
     ticket = ContinuationTicket(
-        "other", "stopped", "acc-1", "signature", desktop=True, resume_active_goal=manual_goal
+        "other",
+        "stopped",
+        "acc-1",
+        "signature",
+        desktop=True,
+        resume_active_goal=manual_goal,
+        owner_key=account_identity("acc-1").fingerprint,
     )
     owner = ContinuationSupervisor()
     await owner._claim(ticket)
@@ -682,3 +697,48 @@ async def test_shutdown_explains_selected_goal_state(migrated_db, monkeypatch, s
     evidence = await checks.check(target)
     assert not evidence.ready
     assert evidence.reason == expected
+
+
+async def test_work_countdown_restarts_when_same_workspace_user_changes(migrated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import ExecutionServer
+    from tests.integration.test_limit_continuation import _thread
+
+    server = ExecutionServer()
+    server.identity = account_identity("W1", "U1")
+    server.account_id = "W1"
+    server.list_threads = AsyncMock(return_value=[_thread("thread", 1)])
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    checks = power.PowerChecks(AsyncMock())
+    checks._turn = AsyncMock(return_value={"id": "complete", "status": "completed"})
+    target = PowerTarget("work", "thread", None, "original")
+    first = await checks.check(target)
+    plan = ShutdownPlan()
+    plan.arm(target, now=0)
+    plan.observe(first, 0)
+    server.identity = account_identity("W1", "U2")
+    second = await checks.check(target)
+    assert first.ready and second.ready
+    assert first.identity != second.identity
+    plan.observe(second, 20)
+    assert plan.remaining(20) == 120
+
+
+async def test_limits_shutdown_explains_missing_profile_owner(migrated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import ExecutionServer
+
+    server = ExecutionServer()
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: server)
+    accounts = AsyncMock()
+    accounts.all_health.return_value = [
+        replace(_health("legacy", allowed=False, quota=QuotaState.LIMITED_NO_RESET), identity=None)
+    ]
+    result = await power.PowerChecks(accounts).check(PowerTarget("limits"))
+    assert not result.ready
+    assert result.values == {"count": 1}
+    assert "owner" in result.reason

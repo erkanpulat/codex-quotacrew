@@ -5,14 +5,21 @@ import sys
 import pytest
 
 from codex_account_manager.accounts.service import AccountService
+from codex_account_manager.domain.identity import AccountIdentity, IdentityState
 from tests.fakes import FakeAppServer
 
 
 def _factory(account_id="acc-1", **kw):
     def make(_home):
-        return FakeAppServer(account_id=account_id, **kw)
+        return FakeAppServer(account_id=account_id, identity=_identity(account_id), **kw)
 
     return make
+
+
+def _identity(account_id="acc-1"):
+    return AccountIdentity(
+        user_id="test-user", workspace_id=account_id, state=IdentityState.COMPLETE
+    )
 
 
 async def test_create_and_list_profile(migrated_db):
@@ -125,11 +132,11 @@ async def test_active_health_uses_shared_snapshot_not_stale_profile(migrated_db)
 
     def factory(home):
         calls.append(home)
-        return FakeAppServer(account_id="active")
+        return FakeAppServer(account_id="active", identity=_identity("active"))
 
     service = AccountService(app_server_factory=factory)
     profile = await service.create_profile("personal")
-    await service.profiles.bind_account(profile.id, "active")
+    await service.profiles.bind_account(profile.id, "active", user_id="test-user")
     (migrated_db.profiles_dir / profile.id / "auth.json").write_bytes(b"old opaque credentials")
     health = (await service.all_health())[0]
     assert calls == [str(migrated_db.shared_codex_home)]
@@ -143,14 +150,15 @@ async def test_transient_health_failure_retains_display_but_never_allows_switch(
     from codex_account_manager.core.errors import AppServerError
     from codex_account_manager.domain.states import QuotaState
 
-    server = FakeAppServer()
+    server = FakeAppServer(identity=_identity())
     service = AccountService(app_server_factory=lambda _: server)
     profile = await service.create_profile("work")
     profile.bound_account_id = "acc-1"
+    profile.bound_user_id = "test-user"
     (migrated_db.profiles_dir / profile.id / "auth.json").write_bytes(b"opaque")
-    previous = await service._health_for(profile, active_account_id="acc-1")
+    previous = await service._health_for(profile)
     server._fail_on.add("read_account")
-    health = await service._health_for(profile, active_account_id="acc-1")
+    health = await service._health_for(profile)
     assert health.stale and health.email == previous.email
     assert health.primary_used_percent == previous.primary_used_percent
     assert health.last_checked_at == previous.last_checked_at
@@ -158,11 +166,11 @@ async def test_transient_health_failure_retains_display_but_never_allows_switch(
     assert not health.reauth_required and not SwitchPolicy._is_available(health)
     assert not SwitchPolicy._current_limited(health)
     server._fail_on.clear()
-    recovered = await service._health_for(profile, active_account_id="acc-1")
+    recovered = await service._health_for(profile)
     assert not recovered.stale and recovered.error is None
     assert SwitchPolicy._is_available(recovered)
     profile.bound_account_id = "someone-else"
-    unrelated = service._failed_health(profile, AppServerError("offline"), active_account_id=None)
+    unrelated = service._failed_health(profile, AppServerError("offline"))
     assert unrelated.email is None and not unrelated.stale
 
 
@@ -174,8 +182,8 @@ async def test_explicit_revocation_clears_cached_health_but_keeps_profile(migrat
     profile.bound_account_id = "acc-1"
     auth = migrated_db.profiles_dir / profile.id / "auth.json"
     auth.write_bytes(b"opaque")
-    await service._health_for(profile, active_account_id=None)
-    failed = service._failed_health(profile, SignInRequiredError("revoked"), active_account_id=None)
+    await service._health_for(profile)
+    failed = service._failed_health(profile, SignInRequiredError("revoked"))
     assert failed.reauth_required and not failed.stale
     assert failed.email is None and failed.primary_used_percent is None
     assert auth.read_bytes() == b"opaque"
@@ -191,7 +199,9 @@ async def test_unknown_active_identity_never_refreshes_profile_copies(migrated_d
     calls = []
     saved = CodexAppServer("synthetic", refresh_on_unauthorized=True)
     saved.start = AsyncMock()
-    saved.read_account = AsyncMock(return_value=await FakeAppServer().read_account())
+    saved.read_account = AsyncMock(
+        return_value=await FakeAppServer(identity=_identity()).read_account()
+    )
 
     def unavailable(home):
         calls.append(home)
@@ -225,7 +235,11 @@ async def test_confirmed_signed_out_shared_home_does_not_block_saved_accounts(
 
     def factory(home):
         calls.append(home)
-        return signed_out if home == str(migrated_db.shared_codex_home) else FakeAppServer()
+        return (
+            signed_out
+            if home == str(migrated_db.shared_codex_home)
+            else FakeAppServer(identity=_identity())
+        )
 
     service = AccountService(app_server_factory=factory)
     profile = await service.create_profile("saved")
@@ -237,11 +251,15 @@ async def test_confirmed_signed_out_shared_home_does_not_block_saved_accounts(
     result = (await service.all_health())[0]
     assert result.error is None and result.account_match and not result.is_active
     assert calls == [str(migrated_db.shared_codex_home), profile.codex_home]
-    signed_out._request.assert_awaited_once_with("account/read", {"refreshToken": False})
+    assert [call.args[0] for call in signed_out._request.await_args_list] == [
+        "accountSession/list",
+        "account/read",
+    ]
     assert service.credentials.read_active() == original
 
 
 async def test_health_cannot_race_with_switch_or_login(migrated_db):
+    from codex_account_manager.core.errors import OperationBusyError
     from codex_account_manager.core.operation_lock import OperationLock
     from tests.fakes import FakeAppServer
 
@@ -254,10 +272,31 @@ async def test_health_cannot_race_with_switch_or_login(migrated_db):
     service = AccountService(app_server_factory=factory)
     await service.create_profile("work")
     with OperationLock(migrated_db.data_dir / "account-operation.lock"):
-        health = await service.all_health()
-    assert len(health) == 1
-    assert health[0].error is None
-    assert calls
+        with pytest.raises(OperationBusyError):
+            await service.all_health()
+    assert not calls
+
+
+async def test_continuation_lock_defers_health_without_marking_account_stale(migrated_db):
+    from codex_account_manager.continuity.automation import ContinuationSupervisor
+    from codex_account_manager.core.errors import OperationBusyError
+    from tests.fakes import account_auth
+
+    server = FakeAppServer(account_id="acc-1", identity=_identity())
+    service = AccountService(app_server_factory=lambda _: server)
+    profile = await service.create_profile("active")
+    await service.profiles.bind_account(profile.id, "acc-1", user_id="test-user")
+    service.credentials.profile_auth_path(profile.codex_home).write_bytes(account_auth("acc-1"))
+    service.credentials.write_active_atomic(account_auth("acc-1", "test-user"))
+    previous = (await service.all_health())[0]
+    assert previous.is_active and not previous.stale and previous.error is None
+    supervisor = ContinuationSupervisor()
+    with supervisor._account_session():
+        with pytest.raises(OperationBusyError):
+            await service.all_health()
+    recovered = (await service.all_health())[0]
+    assert recovered.is_active and not recovered.stale and recovered.error is None
+    assert recovered.account_match is True and recovered.ordinary_usage_allowed is True
 
 
 async def test_same_home_reads_cannot_rotate_tokens_concurrently(migrated_db):
@@ -267,7 +306,7 @@ async def test_same_home_reads_cannot_rotate_tokens_concurrently(migrated_db):
     release = asyncio.Event()
 
     class SlowServer(FakeAppServer):
-        async def read_account(self):
+        async def read_account(self, *, include_identity=False):
             started.set()
             await release.wait()
             return await super().read_account()
@@ -293,7 +332,7 @@ async def test_repeated_cancellation_keeps_read_lease_until_cleanup_finishes(mig
     release = asyncio.Event()
 
     class ClosingServer(FakeAppServer):
-        async def read_account(self):
+        async def read_account(self, *, include_identity=False):
             started.set()
             await asyncio.Event().wait()
 
@@ -353,7 +392,7 @@ async def test_stalled_profile_times_out_without_hiding_healthy_profile(migrated
     from codex_account_manager.core.operation_lock import OperationLock
 
     class StalledServer(FakeAppServer):
-        async def read_account(self):
+        async def read_account(self, *, include_identity=False):
             await asyncio.Event().wait()
 
     stalled = StalledServer()
@@ -363,7 +402,9 @@ async def test_stalled_profile_times_out_without_hiding_healthy_profile(migrated
     await service.profiles.bind_account(healthy.id, "acc-1")
     service.credentials.profile_auth_path(healthy.codex_home).write_bytes(b"opaque")
     service._factory = lambda home: (
-        stalled if home == slow.codex_home else FakeAppServer(account_id="acc-1")
+        stalled
+        if home == slow.codex_home
+        else FakeAppServer(account_id="acc-1", identity=_identity())
     )
     monkeypatch.setattr(module, "ACCOUNT_READ_TIMEOUT", 0.05)
     results = {row.alias: row for row in await asyncio.wait_for(service.all_health(), 2)}
@@ -372,7 +413,7 @@ async def test_stalled_profile_times_out_without_hiding_healthy_profile(migrated
     assert stalled.closed
     with OperationLock(migrated_db.data_dir / "account-operation.lock"):
         pass
-    service._factory = lambda _: FakeAppServer(account_id="acc-1")
+    service._factory = lambda _: FakeAppServer(account_id="acc-1", identity=_identity())
     assert all(row.error is None for row in await service.all_health())
 
 
@@ -389,7 +430,7 @@ async def test_missing_account_identity_is_unverified_not_a_mismatch(migrated_db
         return snapshot
 
     server.read_account = incomplete
-    health = await service._health_for(profile, active_account_id=None)
+    health = await service._health_for(profile)
     assert health.account_match is None and health.error
     assert not health.reauth_required and health.email is None
 

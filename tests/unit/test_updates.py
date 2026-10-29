@@ -12,6 +12,7 @@ from codex_account_manager.core.errors import OperationBusyError
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.storage.database import connect
 from codex_account_manager.storage.repositories import SettingsRepository
+from tests.fakes import account_identity
 
 PACKAGE = b"synthetic installer; never executed"
 
@@ -216,7 +217,15 @@ async def test_install_rejects_active_work_tampering_and_unsupported_installatio
     held = None
     if fault == "pending":
         await ContinuationSupervisor().save_pending(
-            [ContinuationTicket("thread", "turn", "account", "goal")]
+            [
+                ContinuationTicket(
+                    "thread",
+                    "turn",
+                    "account",
+                    "goal",
+                    owner_key=account_identity("account").fingerprint,
+                )
+            ]
         )
     elif fault == "lock":
         held = OperationLock(migrated_db.data_dir / "account-operation.lock")

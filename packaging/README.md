@@ -40,3 +40,15 @@ Keep the complete extracted folder together. The installer includes the CLI sepa
 ## Dependency notices
 
 `scripts/bundle_licenses.py` collects notices into `_internal/licenses/LICENSES.txt`. When updating Qt, update its matching files under `packaging/licenses` and verify the packaged GUI again. Preserve license files in every distribution.
+
+## Maintainer tools
+
+The `scripts/` directory contains source and release tools; these scripts are not installed with the Windows application.
+
+| Tools | Purpose |
+| --- | --- |
+| `bootstrap.ps1` | Set up a source checkout and its shortcuts. |
+| `build_icons.py`, `render_preview.py` | Regenerate the app icons and documentation screenshots using synthetic accounts. |
+| `bundle_licenses.py` | Collect dependency notices for PyInstaller. |
+| `verify_windows_package.py`, `verify_windows_installer.py` | Verify the bundled GUI and test installation, upgrade and removal on disposable CI runners. |
+| `build_msix.py`, `verify_msix.py`, `sign_msix_development.ps1` | Build and inspect Store packages, or sign a development copy for isolated testing. |

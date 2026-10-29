@@ -12,7 +12,7 @@ from codex_account_manager.core.events import bus
 from codex_account_manager.domain.states import GoalState
 from codex_account_manager.storage.database import connect
 from codex_account_manager.storage.repositories import SettingsRepository
-from tests.fakes import ExecutionServer
+from tests.fakes import ExecutionServer, account_identity
 
 
 def goal(status="active", *, budget=1000, used=100):
@@ -22,7 +22,7 @@ def goal(status="active", *, budget=1000, used=100):
 async def prepared(supervisor):
     ticket = await supervisor.prepare("thread")
     assert ticket is not None
-    return replace(ticket, account_id="acc-1")
+    return replace(ticket, account_id="acc-1", owner_key=account_identity("acc-1").fingerprint)
 
 
 @pytest.mark.parametrize("surface", ["desktop", "ide"])
@@ -119,9 +119,9 @@ async def test_prepared_continuation_survives_process_exit_and_recovers_once(mig
     )
     assert result.returncode == 73, result.stderr
     restarted = ContinuationSupervisor(factory=lambda: server)
-    await restarted.recover_pending("acc-1")
+    await restarted.recover_pending(account_identity("acc-1").fingerprint)
     await asyncio.gather(*tuple(restarted.tasks))
-    await restarted.recover_pending("acc-1")
+    await restarted.recover_pending(account_identity("acc-1").fingerprint)
     assert len(server.turn_calls) == 1
     async with connect() as db:
         assert not await (await db.execute("SELECT * FROM pending_continuations")).fetchall()
@@ -144,7 +144,9 @@ async def test_pending_recovery_never_replays_unsafe_work(migrated_db, changed):
             await db.execute("UPDATE pending_continuations SET created_at=0")
             await db.commit()
     restarted = ContinuationSupervisor(factory=lambda: server)
-    await restarted.recover_pending("other" if changed == "account" else "acc-1")
+    await restarted.recover_pending(
+        account_identity("other" if changed == "account" else "acc-1").fingerprint
+    )
     await asyncio.gather(*tuple(restarted.tasks))
     assert not server.turn_calls
     async with connect() as db:
@@ -178,7 +180,7 @@ async def test_stopping_monitoring_can_discard_waiting_tickets_before_reenable(m
     supervisor = ContinuationSupervisor(factory=lambda: server)
     await supervisor.save_pending([await prepared(supervisor)])
     await supervisor.stop(clear_pending=True)
-    await supervisor.recover_pending("acc-1")
+    await supervisor.recover_pending(account_identity("acc-1").fingerprint)
     assert not supervisor.tasks and not server.turn_calls
     async with connect() as db:
         assert not await (await db.execute("SELECT * FROM pending_continuations")).fetchall()
@@ -253,12 +255,12 @@ async def test_limit_during_owned_continuation_remains_eligible_for_next_handoff
     server = LimitedAgain()
     supervisor = ContinuationSupervisor(factory=lambda: server)
     await supervisor.run(await prepared(supervisor))
-    pending = await supervisor.tracker.limited("acc-1")
+    pending = await supervisor.tracker.limited(account_identity("acc-1").fingerprint)
     assert len(pending) == 1
     assert pending[0][1] == "1"
     next_ticket = await supervisor.prepare("thread")
     assert next_ticket is not None and next_ticket.turn_id == "1"
-    assert not await supervisor.tracker.limited("acc-other")
+    assert not await supervisor.tracker.limited(account_identity("acc-other").fingerprint)
 
 
 async def test_active_goal_continues_until_complete_without_resetting_budget(migrated_db):

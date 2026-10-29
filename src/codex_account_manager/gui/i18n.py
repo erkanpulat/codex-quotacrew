@@ -74,6 +74,8 @@ EN = {
 
 TR = {
     "Codex workspace routing rejected discovery (401).": "Codex çalışma alanı bağlantısını reddetti (401). Bu bir kota sonucu değildir; bağlantı yeniden kontrol edilecek. Manuel hesap geçişi kullanılabilir.",
+    "The user and workspace could not be verified. Check Codex or sign in again.": "Kullanıcı ve çalışma alanı doğrulanamadı. Codex bağlantısını kontrol edin veya yeniden giriş yapın.",
+    "This saved profile needs user verification. Sign in again to confirm its owner.": "Bu eski profilin kullanıcı kimliği doğrulanmalı. Hesabın sahibini doğrulamak için yeniden giriş yapın.",
     "Codex rejected the active session (401). Switch accounts or sign in again.": "Codex etkin oturumu reddetti (401). Başka hesaba geçin veya yeniden giriş yapın.",
     "No target account passed the fresh availability check.": "Güncel kontrolde kullanılabilir bir hedef hesap doğrulanamadı. Hesap bilgileri yeniden kontrol edilecek.",
     "The operation could not be completed. See Activity or System check for details.": "İşlem tamamlanamadı. Ayrıntılar için Etkinlik veya Sistem Kontrolü bölümüne bakın.",
@@ -299,6 +301,7 @@ TR = {
     "Enable monitoring before requesting continuation.": "Devam isteğinden önce izlemeyi açın.",
     "The active account must have verified available capacity.": "Etkin hesabın kullanılabilir kotası doğrulanmış olmalı.",
     "The active account identity could not be verified.": "Etkin hesap kimliği doğrulanamadı.",
+    "The owner of {count} saved profiles could not be verified. Check these accounts before shutdown.": "{count} kayıtlı profilin kullanıcı kimliği doğrulanamadı. Kapatmadan önce bu hesapları kontrol edin.",
     "No eligible usage-limit interruption was verified. Nothing was sent.": "Devam edilebilecek bir kota kesintisi doğrulanamadı. Mesaj gönderilmedi.",
     "This continuation was already attempted. Inspect the conversation before retrying.": "Bu devam isteği daha önce denendi. Yeniden denemeden önce konuşmayı kontrol edin.",
     "Waiting for the conversation connection. Nothing has been sent. Checks will retry for up to 10 minutes while monitoring remains enabled.": "Konuşma bağlantısı bekleniyor. Henüz mesaj gönderilmedi. İzleme açık olduğu sürece en fazla 10 dakika boyunca yeniden kontrol edilecek.",
@@ -1019,6 +1022,7 @@ def continuation_detail(payload: dict) -> str:
         "ide_refresh": "Reloading the IDE account session",
         "connection": "Codex connection",
         "account": "Active account verification",
+        "identity": "The active account identity could not be verified.",
         "conversation": "Conversation loading",
         "verification": "Conversation state verification",
         "goal": "Goal state verification",

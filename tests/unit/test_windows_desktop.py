@@ -68,17 +68,22 @@ async def test_missing_desktop_stops_switch_before_credentials_or_recovery_chang
     from codex_account_manager.auth.transaction import AuthTransaction
     from codex_account_manager.core.errors import DesktopLaunchError
     from codex_account_manager.domain.models import Profile
+    from tests.fakes import account_auth
 
     monkeypatch.setattr(windows, "is_desktop_installed", lambda: False)
     store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
     store.write_active_atomic(b"original-shared-auth")
     home = tmp_paths.profiles_dir / "target"
     home.mkdir(parents=True)
-    (home / "auth.json").write_bytes(b"target-auth")
+    (home / "auth.json").write_bytes(account_auth("account-2"))
     config = store.shared_home / "config.toml"
     config.write_bytes(b"original-config")
     target = Profile(
-        id="target", alias="Second", codex_home=str(home), bound_account_id="account-2"
+        id="target",
+        alias="Second",
+        codex_home=str(home),
+        bound_account_id="account-2",
+        bound_user_id="test-user",
     )
     verify, stop, launch = AsyncMock(), Mock(), Mock()
     monkeypatch.setattr(windows, "stop_desktop", stop)
@@ -93,7 +98,7 @@ async def test_missing_desktop_stops_switch_before_credentials_or_recovery_chang
         await tx.switch(target)
     assert store.read_active() == b"original-shared-auth"
     assert config.read_bytes() == b"original-config"
-    assert (home / "auth.json").read_bytes() == b"target-auth"
+    assert (home / "auth.json").read_bytes() == account_auth("account-2")
     assert not tx.recovery_path.exists()
     assert not (tmp_paths.data_dir / "switch.journal.json").exists()
     verify.assert_not_awaited()
@@ -124,6 +129,7 @@ async def test_cli_and_ide_activation_without_desktop_stays_transactional(
     from codex_account_manager.auth.transaction import AuthTransaction
     from codex_account_manager.core.errors import TransactionError
     from codex_account_manager.domain.models import Profile
+    from tests.fakes import account_auth, account_identity
 
     monkeypatch.setattr(windows, "is_desktop_installed", lambda: False)
     monkeypatch.setattr(windows, "is_desktop_running", lambda: False)
@@ -134,20 +140,24 @@ async def test_cli_and_ide_activation_without_desktop_stays_transactional(
     store.write_active_atomic(b"original")
     home = tmp_paths.profiles_dir / "target"
     home.mkdir(parents=True)
-    (home / "auth.json").write_bytes(b"target")
+    (home / "auth.json").write_bytes(account_auth("acc2"))
     target = Profile(
-        id="target", alias="IDE account", codex_home=str(home), bound_account_id="acc2"
+        id="target",
+        alias="IDE account",
+        codex_home=str(home),
+        bound_account_id="acc2",
+        bound_user_id="test-user",
     )
 
     async def verify(_home):
-        return "acc2" if verify_matches else "wrong"
+        return account_identity("acc2" if verify_matches else "wrong")
 
     tx = AuthTransaction(
         credential_store=store, desktop=desktop.WindowsDesktopLauncher(), verify_account=verify
     )
     if verify_matches:
         assert (await tx.switch(target)).success
-        assert store.read_active() == b"target"
+        assert store.read_active() == account_auth("acc2")
         stop.assert_not_called()
     else:
         with pytest.raises(TransactionError) as error:
@@ -222,11 +232,18 @@ async def test_switch_commits_when_verified_account_and_packaged_process_are_rea
     from codex_account_manager.adapters.credential_store import FileCredentialStore
     from codex_account_manager.auth.transaction import AuthTransaction
     from codex_account_manager.domain.models import Profile
+    from tests.fakes import account_auth, account_identity
 
     home = tmp_paths.profiles_dir / "target"
     home.mkdir(parents=True)
-    (home / "auth.json").write_bytes(b"target-credentials")
-    target = Profile(id="target", alias="Other", codex_home=str(home), bound_account_id="account-2")
+    (home / "auth.json").write_bytes(account_auth("account-2"))
+    target = Profile(
+        id="target",
+        alias="Other",
+        codex_home=str(home),
+        bound_account_id="account-2",
+        bound_user_id="test-user",
+    )
     store = FileCredentialStore(shared_home=tmp_paths.shared_codex_home)
     store.write_active_atomic(b"current-credentials")
     running = False
@@ -245,7 +262,7 @@ async def test_switch_commits_when_verified_account_and_packaged_process_are_rea
     monkeypatch.setattr(windows, "is_desktop_running", lambda: running)
 
     async def verify(_home):
-        return "account-2"
+        return account_identity("account-2")
 
     transaction = AuthTransaction(
         credential_store=store,
@@ -255,7 +272,7 @@ async def test_switch_commits_when_verified_account_and_packaged_process_are_rea
     result = await transaction.switch(target)
     assert result.success
     assert running
-    assert store.read_active() == b"target-credentials"
+    assert store.read_active() == account_auth("account-2")
 
 
 def test_shutdown_rechecks_replacement_children(monkeypatch):

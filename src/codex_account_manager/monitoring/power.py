@@ -47,6 +47,8 @@ class PowerTarget:
 def all_accounts_limited(health: list[ProfileHealth], now: datetime) -> bool:
     return bool(health) and all(
         h.auth_present
+        and h.identity is not None
+        and h.identity.owner_key is not None
         and h.account_match is True
         and not h.error
         and not h.stale
@@ -371,19 +373,25 @@ class PowerChecks:
                         values={"count": activating[0]},
                     )
                 if target.mode == "work":
-                    account_id = (await adapter.read_account()).account_id
+                    snapshot = await adapter.read_account(include_identity=True)
+                    owner_key = snapshot.identity.fingerprint if snapshot.identity else None
+                    if not owner_key:
+                        return PowerEvidence(
+                            False, "The active account identity could not be verified."
+                        )
                     now = time.time()
                     async with connect() as db:
                         pending = await (
                             await db.execute(
                                 """SELECT COUNT(*) FROM pending_continuations AS pending
-                            WHERE account_id=? AND created_at > ? AND created_at <= ?
+                            WHERE (owner_key=? OR owner_key IS NULL)
+                              AND created_at > ? AND created_at <= ?
                               AND NOT EXISTS (
                                 SELECT 1 FROM continuation_attempts AS attempt
                                 WHERE attempt.thread_id=pending.thread_id
                                   AND attempt.source_turn_id=pending.turn_id
                               )""",
-                                (account_id, now - 600, now),
+                                (owner_key, now - 600, now),
                             )
                         ).fetchone()
                     if pending and pending[0]:
@@ -422,8 +430,20 @@ class PowerChecks:
                             False,
                             "The selected turn has not completed successfully. Shutdown is waiting.",
                         )
-                    return PowerEvidence(True, "Selected work completed.", target.thread_id or "")
+                    return PowerEvidence(
+                        True, "Selected work completed.", f"{owner_key}:{target.thread_id}"
+                    )
                 health = await self.accounts.all_health()
+                unidentified = sum(
+                    not h.identity or not h.identity.owner_key or h.account_match is not True
+                    for h in health
+                )
+                if unidentified:
+                    return PowerEvidence(
+                        False,
+                        "The owner of {count} saved profiles could not be verified. Check these accounts before shutdown.",
+                        values={"count": unidentified},
+                    )
                 if not all_accounts_limited(health, datetime.now(UTC)):
                     available = sum(
                         h.ordinary_usage_allowed is True and not h.stale and not h.error
@@ -439,7 +459,9 @@ class PowerChecks:
                         False,
                         "Not all five-hour quotas are confirmed exhausted. Check Accounts for missing or expired sign-ins.",
                     )
-                identity = "|".join(sorted(h.profile_id for h in health))
+                identity = "|".join(
+                    sorted(f"{h.profile_id}:{h.identity.fingerprint}" for h in health if h.identity)
+                )
                 return PowerEvidence(
                     True, "All saved accounts have verified usage limits.", identity
                 )

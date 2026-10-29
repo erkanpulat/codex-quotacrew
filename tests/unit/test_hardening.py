@@ -14,10 +14,11 @@ from codex_account_manager.core.files import atomic_write
 from codex_account_manager.core.logging import _RedactingFilter, _RedactingFormatter
 from codex_account_manager.core.operation_lock import OperationLock
 from codex_account_manager.core.redaction import redact_text
+from codex_account_manager.domain.identity import AccountIdentity, IdentityState
 from codex_account_manager.domain.models import Profile
 from codex_account_manager.domain.states import GoalState, QuotaState
 from codex_account_manager.goals.service import GoalService
-from tests.fakes import FakeAppServer, FakeDesktop
+from tests.fakes import FakeAppServer, FakeDesktop, account_identity
 from tests.unit.test_auth_transaction import _profile
 from tests.unit.test_policy import _health
 
@@ -140,31 +141,13 @@ async def test_readiness_timeout_is_failure(tmp_paths):
     store.write_active_atomic(b"original")
 
     async def verify(_):
-        return "acc-1"
+        return account_identity()
 
     tx = AuthTransaction(
         credential_store=store, desktop=FakeDesktop(ready=False), verify_account=verify
     )
     with pytest.raises(TransactionError) as error:
         await tx.switch(_profile(tmp_paths))
-    assert error.value.rolled_back
-    assert store.read_active() == b"original"
-
-
-async def test_resume_failure_rolls_back_before_commit(tmp_paths):
-    store = FileCredentialStore(tmp_paths.shared_codex_home)
-    store.write_active_atomic(b"original")
-
-    async def verify(_):
-        return "acc-1"
-
-    async def resume():
-        raise RuntimeError("resume failed")
-
-    tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
-    with pytest.raises(TransactionError) as error:
-        await tx.switch(_profile(tmp_paths), after_switch=resume)
-    assert error.value.stage == "resume_thread"
     assert error.value.rolled_back
     assert store.read_active() == b"original"
 
@@ -366,15 +349,21 @@ async def test_health_error_preserves_known_active_identity(migrated_db):
         alias="work",
         codex_home=str(migrated_db.profiles_dir / "work"),
         bound_account_id="account-work",
+        bound_user_id="user-work",
     )
-    health = await service._health_for(profile, active_account_id="account-work")
+    health = await service._health_for(profile, active_identity=profile.identity)
     assert health.is_active
     assert health.quota_state == QuotaState.UNKNOWN
     assert health.error == "Temporarily unavailable"
 
 
 async def test_duplicate_account_binding_preserves_original(migrated_db):
-    service = AccountService(app_server_factory=lambda _: FakeAppServer(account_id="same-account"))
+    identity = AccountIdentity(
+        user_id="same-user", workspace_id="same-account", state=IdentityState.COMPLETE
+    )
+    service = AccountService(
+        app_server_factory=lambda _: FakeAppServer(account_id="same-account", identity=identity)
+    )
     await service.create_profile("work")
     await service.create_profile("personal")
     await service.bind_current_account("work")

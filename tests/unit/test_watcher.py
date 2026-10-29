@@ -9,12 +9,14 @@ from codex_account_manager.core.events import bus
 from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.domain.states import QuotaState, SwitchPolicyKind
 from codex_account_manager.monitoring.watcher import Watcher
+from tests.fakes import account_identity
 
 
 def _health(alias, *, active=False, allowed=True, quota=QuotaState.AVAILABLE, secondary=0.0):
     return ProfileHealth(
         alias=alias,
         profile_id=alias,
+        identity=account_identity(alias),
         plan_type="plus",
         primary_used_percent=0.0,
         secondary_used_percent=secondary,
@@ -150,7 +152,9 @@ async def test_account_change_skips_failover_for_that_poll():
     class Continuity(_FakeContinuity):
         def __init__(self):
             super().__init__()
-            self._account_ids = iter(("account-a", "account-b"))
+            self._account_ids = iter(
+                (account_identity("ana").fingerprint, account_identity("other").fingerprint)
+            )
 
         async def observe_work(self):
             return next(self._account_ids)
@@ -180,7 +184,7 @@ async def test_failover_records_authentication_recovery():
 
     class Continuity(_FakeContinuity):
         async def observe_work(self):
-            return "account-a"
+            return account_identity("ana").fingerprint
 
         async def continue_on_limit(self, alias: str, **kwargs):
             self.continued.append((alias, kwargs["reason"]))
@@ -329,7 +333,7 @@ async def test_deferred_switch_rechecks_on_next_poll_without_failure_backoff():
         unsubscribe()
     assert len(events) == 1
     assert continuity.continued == ["ready", "ready"]
-    assert watcher._retry_at == 0
+    assert not watcher._failed_switches
 
 
 async def test_temporary_account_lock_does_not_cause_five_minute_backoff():
@@ -353,7 +357,7 @@ async def test_temporary_account_lock_does_not_cause_five_minute_backoff():
         policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
     )
     await watcher.poll_once()
-    assert watcher._retry_at == 0
+    assert not watcher._failed_switches
     await watcher.poll_once()
     assert continuity.continued == ["ready", "ready"]
 
@@ -421,6 +425,49 @@ async def test_settings_event_wakes_monitor_without_waiting_old_interval(migrate
         await asyncio.wait_for(task, 2)
 
 
+async def test_busy_health_automatically_recovers_before_normal_poll(migrated_db):
+    import asyncio
+
+    from codex_account_manager.accounts.service import AccountService
+    from codex_account_manager.core.operation_lock import OperationLock
+    from tests.fakes import FakeAppServer, account_auth
+
+    service = AccountService(
+        app_server_factory=lambda _: FakeAppServer(
+            account_id="active", identity=account_identity("active")
+        )
+    )
+    profile = await service.create_profile("active")
+    await service.profiles.bind_account(profile.id, "active", user_id="test-user")
+    service.credentials.profile_auth_path(profile.codex_home).write_bytes(account_auth("active"))
+    service.credentials.write_active_atomic(account_auth("active"))
+    continuity = _FakeContinuity()
+    watcher = Watcher(accounts=service, continuity=continuity, poll_seconds=60)
+    checked = asyncio.Event()
+    received = asyncio.Queue()
+    unsubscribe = bus.subscribe("monitor.status", lambda event: checked.set())
+    unsubscribe_health = bus.subscribe(
+        "health.updated", lambda event: received.put_nowait(event.payload["health"])
+    )
+    task = None
+    try:
+        with OperationLock(migrated_db.data_dir / "account-operation.lock"):
+            task = asyncio.create_task(watcher.run())
+            await asyncio.wait_for(checked.wait(), 2)
+            await asyncio.sleep(0.1)
+            assert received.empty(), "A busy read must not publish an account failure"
+        health = await asyncio.wait_for(received.get(), 4)
+        assert len(health) == 1 and health[0].is_active
+        assert health[0].error is None and not health[0].stale
+        assert continuity.continued == []
+    finally:
+        watcher.stop()
+        if task:
+            await asyncio.wait_for(task, 2)
+        unsubscribe()
+        unsubscribe_health()
+
+
 def test_invalid_intervals_have_safe_default():
     from codex_account_manager.monitoring.settings import poll_interval
 
@@ -471,6 +518,33 @@ async def test_failed_automatic_switch_uses_backoff_until_another_target(monkeyp
     assert continuity.calls == ["first", "first", "second"]
 
 
+async def test_failed_target_does_not_block_other_ready_accounts(monkeypatch):
+    from codex_account_manager.monitoring import watcher as module
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
+
+    class Continuity(_FakeContinuity):
+        async def continue_on_limit(self, alias):
+            self.continued.append(alias)
+            raise RuntimeError("Target verification failed")
+
+    health = [
+        _health("limited", active=True, allowed=False, quota=QuotaState.LIMITED_WITH_RESET),
+        _health("first", secondary=0.0),
+        _health("second", secondary=10.0),
+    ]
+    continuity = Continuity()
+    watcher = Watcher(
+        accounts=_StubAccounts(health),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
+    )
+    await watcher.poll_once()
+    await watcher.poll_once()
+    await watcher.poll_once()
+    assert continuity.continued == ["first", "second"]
+
+
 async def test_paused_monitor_refreshes_health_without_switching_or_tracking(migrated_db):
     import asyncio
     from unittest.mock import AsyncMock
@@ -482,7 +556,9 @@ async def test_paused_monitor_refreshes_health_without_switching_or_tracking(mig
     watcher.poll_once = AsyncMock(return_value=[])
     task = asyncio.create_task(watcher.run())
     try:
-        await asyncio.sleep(0.08)
+        async with asyncio.timeout(2):
+            while not watcher.poll_once.called:
+                await asyncio.sleep(0.01)
         watcher.poll_once.assert_awaited_once_with(allow_switch=False, track_work=False)
         watcher.poll_once.reset_mock()
         await SettingsRepository().set("monitor_enabled", "true")
@@ -494,3 +570,26 @@ async def test_paused_monitor_refreshes_health_without_switching_or_tracking(mig
     finally:
         watcher.stop()
         await task
+
+
+async def test_same_workspace_user_change_during_first_poll_discards_stale_health():
+    from dataclasses import replace
+    from unittest.mock import AsyncMock
+
+    health = [
+        replace(
+            _health("source", active=True, allowed=False, quota=QuotaState.LIMITED_WITH_RESET),
+            identity=account_identity("W1", "U1"),
+        ),
+        replace(_health("target"), identity=account_identity("W1", "U3")),
+    ]
+    continuity = _FakeContinuity()
+    continuity.observe_work = AsyncMock(return_value=account_identity("W1", "U2").fingerprint)
+    watcher = Watcher(
+        accounts=_StubAccounts(health),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.AVAILABILITY_FAILOVER),
+    )
+    await watcher.poll_once()
+    assert not continuity.continued
+    continuity.automation.recover_pending.assert_not_awaited()

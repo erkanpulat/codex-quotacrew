@@ -38,7 +38,21 @@ def test_redact_never_raises_on_weird_input():
     assert redact_text("") == ""
 
 
-@pytest.mark.parametrize("key", ["token", "session", "auth", "auth_json", "private_key"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "token",
+        "session",
+        "auth",
+        "auth_json",
+        "private_key",
+        "userId",
+        "chatgpt_user_id",
+        "sessionId",
+        "activeSessionId",
+        "login_owner_id",
+    ],
+)
 @pytest.mark.parametrize(
     "template", ["{key}=sample-value", '"{key}": "sample-value"', "'{key}': 'sample-value'"]
 )

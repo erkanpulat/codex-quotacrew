@@ -4,13 +4,20 @@
 
 # QuotaCrew for Codex
 
-**Hesap değişsin, iş devam etsin.**
+<img src="docs/images/hero-tr.svg" width="1000" alt="Hesap değişsin. İş devam etsin. Hesap yönetimi, sohbet devamı ve isteğe bağlı kapatma." />
 
-Codex hesaplarınız, kalan kotalarınız ve devam eden işleriniz tek pencerede.
+**Hesapların otomatik değişsin, işlerin kaldığı yerden devam etsin. İşin bitince bilgisayarın kapansın.**
 
-**[Windows için indir](https://github.com/erkanpulat/codex-quotacrew/releases/latest)** · [Nasıl çalışır?](#devam-akışı) · [Kurulum](#kurulum) · [English](README.md)
+Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneticisi. Hesaplarını, kotalarını ve işlerini tek pencereden yönet; otomatik devamı ve isteğe bağlı kapatmayı ihtiyacına göre aç.
+
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="Windows için indir" /></a>
+<a href="#devam-akışı"><img src="docs/images/navigation/flow-tr.svg" width="152" height="44" alt="Nasıl çalışır?" /></a>
+<a href="#kurulum"><img src="docs/images/navigation/setup-tr.svg" width="120" height="44" alt="Kurulum" /></a>
+<a href="README.md"><img src="docs/images/navigation/language-tr.svg" width="112" height="44" alt="English" /></a>
 
 Windows · Türkçe / English · Açık ve koyu tema · MIT
+
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=Toplam%20indirme&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release dosyalarının toplam indirme sayısı" /></a>
 
 </div>
 
@@ -22,15 +29,50 @@ Windows · Türkçe / English · Açık ve koyu tema · MIT
 
 Bir işin ortasında limit dolduğunda, hangi hesabın kullanılabilir olduğunu bulmak ve yarım kalan sohbete dönmek zaman alır. **QuotaCrew bu adımları tek yerde toplar:** kotaları karşılaştırın, hesap geçişini nasıl yapacağınızı seçin ve Codex Desktop ya da VS Code'daki uygun konuşmaların kaldığı yerden devam etmesini sağlayın.
 
-- **Hesaplarınızı tek bakışta görün.** Beş saatlik ve haftalık kalan kota, yenilenme zamanı, etkin hesap ve sıfırlama hakları aynı tabloda.
-- **Geçişin kontrolü sizde olsun.** Hesabı kendiniz değiştirin, uygulama önerdiğinde onaylayın veya limit dolduğunda kullanılabilir bir hesaba otomatik geçişi açın.
-- **Yarım kalan işi aynı sohbette sürdürün.** Devam isteği, mevcut hedefi ve talimatları koruyarak kesilen konuşmaya gönderilir.
-- **İşleri ve sonuçlarını takip edin.** İşler, Etkinlik ve sistem tepsisi; izleme durumunu, devam tercihlerini ve doğrulanmış çalışan iş sayısını gösterir.
-- **Çalışma düzeninizi seçin.** Tepside çalıştırın, Windows ile başlatın veya belirlediğiniz koşul gerçekleştiğinde bilgisayarın kapanmasını planlayın.
+<table>
+<tr>
+<td width="33%"><a href="#kurulum"><img src="docs/images/feature-switch-tr.svg" width="280" alt="Limit dolunca, yeni hesap. Kotaları tek pencerede görün. Manuel, onaylı veya otomatik geçişi seçin. Hesaplarını ekle →" /></a></td>
+<td width="33%"><a href="#devam-akışı"><img src="docs/images/feature-continue-tr.svg" width="280" alt="Aynı sohbette devam. Uygun hedefli sohbeti açın. Diğer desteklenen işlere devam isteği gönderin. Akışı incele →" /></a></td>
+<td width="33%"><a href="#iş-bitince-bilgisayar-başında-beklemeyin"><img src="docs/images/feature-power-tr.svg" width="280" alt="İş bitince kapansın. İş, kota veya süre koşulunu seçin. İsteğe bağlı kapatma planını dilediğinizde iptal edin. Kapatmayı keşfet →" /></a></td>
+</tr>
+</table>
+
+**Size uyum sağlasın:** tepside çalıştırın, Windows ile başlatın, açık veya koyu temayı seçin. İşler ve Etkinlik sayfalarından sonuçları takip edin.
 
 Plan rozeti, eşleşen bilgi mevcutsa giriş sırasında kaydedilen abonelik dönemi tarihini de gösterir. Son kontrol ve kaynak açıklaması için üzerine gelin; bu tarih kesin yenileme veya iptal bilgisi değildir.
 
 Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-posta gizleme kontrollerini kullanır. Hesapları, mevcutsa kaydedilmiş abonelik dönemi tarihine göre de sıralayabilirsiniz.
+
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
+
+## Kurulum
+
+[![İndir, tercihlerini seç ve hesabını ekle. Windows indirmelerini açmak için tıklayın.](docs/images/installation-tr.svg)](https://github.com/erkanpulat/codex-quotacrew/releases/latest)
+
+**Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
+
+1. **İndirin ve kurun.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.4.0.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.0.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
+3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
+
+0.4.0 sürümü hesap veritabanını yükseltir. Güncellemeden sonra yeni sürümü kurulu tutun; eski sürümler yükseltilen veritabanını açamaz. Mevcut bir profilin sahibi yeniden doğrulanacaksa işlem menüsünden **Hesabı yeniden doğrula** seçeneğini kullanın.
+
+<details>
+<summary>İlk açılış ekranları ve varsayılan tercihler</summary>
+
+![Codex CLI kontrolü ve onaylı kurulum](docs/images/setup-cli-tr.png)
+
+![İlk açılışta izleme, hesap geçişi ve sohbet devamı tercihleri](docs/images/setup-preferences-tr.png)
+
+Yeni kurulumlarda izleme ve otomatik hesap geçişi seçilidir. Tercihlerinizi ilk açılışta ve daha sonra **Ayarlar**'da değiştirebilirsiniz. Hesap geçişi Codex Desktop'ı yeniden başlatır; çalışmalarınızı kaydedin.
+
+Pencere kapandıktan sonra izlemenin sürmesi için **Tepside çalışmaya devam et** seçeneğini açın. **Duraklat**, otomatik geçişi, iş takibini ve devam işlemlerini durdurur; hesap bilgileri ayarlanan aralıkla (varsayılan 60 saniye) yenilenmeye devam eder. Windows ile başlatma ayrı bir tercihtir. İptal edilen hesap girişini ilgili hesabın işlem menüsünden yeniden başlatabilirsiniz.
+
+Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarının doğrulama değerlerini içerir.
+
+</details>
+
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
 
 ## Devam akışı
 
@@ -57,9 +99,14 @@ Desktop kendi yerel kanalını, IDE mevcut Codex oturumuna Windows IPC bağlant�
 
 Codex Desktop ve VS Code'u birlikte kullanabilirsiniz. VS Code tarafında **OpenAI Codex eklentisi** kurulu olmalı ve konuşma bu eklenti üzerinden açılmalıdır.
 
+<details>
+<summary>VS Code akışının temsili görseli</summary>
+
 ![Solda Codex sohbeti ve devam isteği, sağda örnek kod bulunan temsili VS Code penceresi](docs/images/ide-continuation-example.png)
 
 *Devam akışını anlatan, yapay zekâ ile hazırlanmış temsili görsel; canlı test ekranı değildir.*
+
+</details>
 
 1. Yerel projenizi ve Codex konuşmasını VS Code'da açın.
 2. QuotaCrew'de **Ayarlar → Konuşmalar → IDE'de devam** seçeneğini açın.
@@ -83,31 +130,6 @@ QuotaCrew bir VS Code eklentisi yüklemez. **Projeyi editörde aç** klasörü a
 
 </details>
 
-## Kurulum
-
-[![İndir, tercihlerini seç ve hesabını ekle. Windows indirmelerini açmak için tıklayın.](docs/images/installation-tr.svg)](https://github.com/erkanpulat/codex-quotacrew/releases/latest)
-
-**Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
-
-1. **İndirin ve kurun.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.3.1.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.3.1.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
-2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
-3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
-
-<details>
-<summary>İlk açılış ekranları ve varsayılan tercihler</summary>
-
-![Codex CLI kontrolü ve onaylı kurulum](docs/images/setup-cli-tr.png)
-
-![İlk açılışta izleme, hesap geçişi ve sohbet devamı tercihleri](docs/images/setup-preferences-tr.png)
-
-Yeni kurulumlarda izleme ve otomatik hesap geçişi seçilidir. Tercihlerinizi ilk açılışta ve daha sonra **Ayarlar**'da değiştirebilirsiniz. Hesap geçişi Codex Desktop'ı yeniden başlatır; çalışmalarınızı kaydedin.
-
-Pencere kapandıktan sonra izlemenin sürmesi için **Tepside çalışmaya devam et** seçeneğini açın. **Duraklat**, otomatik geçişi, iş takibini ve devam işlemlerini durdurur; hesap bilgileri ayarlanan aralıkla (varsayılan 60 saniye) yenilenmeye devam eder. Windows ile başlatma ayrı bir tercihtir. İptal edilen hesap girişini ilgili hesabın işlem menüsünden yeniden başlatabilirsiniz.
-
-Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarının doğrulama değerlerini içerir.
-
-</details>
-
 ## İşlerinizi gözden kaçırmayın
 
 **İşler** sayfasında konuşmaları, bağlı hesapları, çalışma durumlarını ve son kontrol zamanlarını birlikte görün. Bir işi seçerek Codex hedefini veya devam işleminin ayrıntılarını açın. **Etkinlik** sayfasında son 50 hesap geçişinin sonucunu takip edin.
@@ -118,6 +140,12 @@ Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarını
 </picture>
 
 Yerel konuşmalarınızı proje, kaynak, başlık veya klasöre göre arayın; ilgili projeyi editörünüzde açın. `Ctrl+F` aramaya odaklanır, `Ctrl+R` sayfayı yeniler. **Takibi temizle**, QuotaCrew'ün takip kayıtlarını temizleyip izlemeyi duraklatır; Codex sohbet geçmişinizi silmez. Çalışan bir konuşmayı durdurmak için Codex'in **Durdur** düğmesini kullanın.
+
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
+
+## İş bitince bilgisayar başında beklemeyin
+
+Uzun bir işi Codex’e bıraktığınızda bilgisayarı kapatmak için başında beklemek zorunda kalmayın. Hesap geçişi ve sohbet devamını tek başına kullanabilir, ihtiyaç duyduğunuzda ayrıca kapatma planı açabilirsiniz.
 
 **Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların doğrulanmış 5 saatlik kotaları dolup geçilebilecek hesap kalmadığında veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
 
@@ -151,11 +179,21 @@ Kullanıcılara güncelleme sunmak için daha yüksek numaralı kararlı bir Git
 
 </details>
 
+<p align="center"><img src="docs/images/section-divider.png" width="500" alt="" /></p>
+
 ## Veriler ve gizlilik
 
 Hesap profilleri, ayarlar ve takip kayıtları bilgisayarınızda saklanır. Mevcut Codex sohbetleriniz ortak `~/.codex` klasöründe kalır; kurulum, güncelleme ve uygulamayı kaldırma bu geçmişi silmez. Veri konumlarını **Sistem Kontrolü** bölümünden görebilirsiniz.
 
 QuotaCrew telemetri toplamaz veya giriş bilgilerinizi kendi sunucusuna göndermez. Codex, giriş ve hesap bilgileri için OpenAI'a bağlanır. Windows'ta kayıtlı profil giriş bilgileri ve hesap geçişi kurtarma verileri kullanıcıya bağlı DPAPI ile şifrelenir. Codex süreci çalışırken profil geçici olarak çözülür; kesintiden kalan dosyalar kurtarma sırasında yeniden korunur. Ortak Codex giriş dosyası ve yerel SQLite metadata'sı erişim izinleriyle korunur, şifrelenmez. Tanılama dışa aktarımı giriş bilgilerini, veritabanını ve konuşma metnini içermez. E-posta adreslerini arayüzde gizleyebilirsiniz. [Güvenlik ve veri koruma](SECURITY.md).
+
+## Bir sonraki işiniz için hazır
+
+Windows paketini indirin, hesaplarınızı ekleyin ve hangi adımların otomatik olacağını seçin.
+
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="Windows için indir" /></a>
+
+---
 
 ## Geliştirme ve katkı
 

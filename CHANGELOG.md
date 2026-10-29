@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-10-29
+
+- Distinguish users sharing a workspace when binding profiles, displaying quotas and identifying the active account.
+- Verify account ownership before credential writes, switching and conversation continuation.
+- Preserve legacy records without guessing their owner and invalidate shutdown evidence when account ownership changes.
+- Support older Codex identity responses and negotiate the capabilities required by newer session APIs.
+- Retry account refresh after account operations instead of treating a temporary lock as stale account information.
+- Keep failed automatic-switch targets on separate retry delays so other available accounts can still be selected.
+- Distinguish unavailable identity checks from account mismatches and show sanitized switch failure details in Activity.
+
 ## 0.3.1 — 2026-10-23
 
 - Verify Desktop activity independently of persisted interrupted turns.

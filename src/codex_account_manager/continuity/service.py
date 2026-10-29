@@ -156,12 +156,13 @@ class ContinuityService:
         try:
             await adapter.start()
             try:
-                account_id = (await adapter.read_account()).account_id
+                snapshot = await adapter.read_account(include_identity=True)
+                owner_key = snapshot.identity.fingerprint if snapshot.identity else None
             except SignInRequiredError:
-                account_id = self.accounts.credentials.active_account_hint()
-                if not account_id:
+                owner_key = self.accounts.credentials.active_identity_hint().fingerprint
+                if not owner_key:
                     raise
-            if not account_id:
+            if not owner_key:
                 await self.tracker.unverified()
                 bus.publish("work.observation_status", state="signed_out")
                 return None
@@ -270,7 +271,7 @@ class ContinuityService:
                             new_turn = False
                             if turn and goal is not None:
                                 previous = self._turn_baselines.get(thread_id)
-                                current = (account_id, turn["id"], goal_signature(goal), generation)
+                                current = (owner_key, turn["id"], goal_signature(goal), generation)
                                 new_turn = bool(
                                     previous
                                     and previous[0] == current[0]
@@ -280,7 +281,7 @@ class ContinuityService:
                                 self._turn_baselines[thread_id] = current
 
                             await self.tracker.observe(
-                                account_id,
+                                owner_key,
                                 thread_id,
                                 turn,
                                 goal,
@@ -334,7 +335,7 @@ class ContinuityService:
                 unsupported=unsupported,
                 checked_at=datetime.now().strftime("%H:%M:%S"),
             )
-            return account_id
+            return owner_key
         finally:
             await adapter.aclose()
 
@@ -371,17 +372,15 @@ class ContinuityService:
         with OperationLock(paths.data_dir / "account-operation.lock"):
             snapshot = await self.accounts.read_snapshot(paths.shared_codex_home)
             profile = next(
-                (
-                    p
-                    for p in await self.profiles.list()
-                    if p.bound_account_id == snapshot.account_id
-                ),
+                (p for p in await self.profiles.list() if p.identity.matches(snapshot.identity)),
                 None,
             )
             if profile is None or not profile.bound_account_id:
                 raise AppServerError("The active account identity could not be verified.")
             active = await self.accounts._health_for(
-                profile, active_account_id=snapshot.account_id, active_snapshot=snapshot
+                profile,
+                active_identity=snapshot.identity,
+                active_snapshot=snapshot,
             )
             if not SwitchPolicy._is_available(active):
                 raise AppServerError("The active account must have verified available capacity.")
@@ -402,7 +401,13 @@ class ContinuityService:
                     "This continuation was already attempted. Inspect the conversation before retrying."
                 )
             await self.automation.save_pending(
-                [replace(ticket, account_id=profile.bound_account_id)]
+                [
+                    replace(
+                        ticket,
+                        account_id=profile.bound_account_id,
+                        owner_key=profile.identity.fingerprint,
+                    )
+                ]
             )
         bus.publish("monitor.refresh_requested")
 
@@ -494,35 +499,35 @@ class ContinuityService:
                 bus.publish("continuation.status", state="needs_user")
         return result
 
-    async def _require_restart_safe(self, expected_account_id: str | None = None) -> str | None:
+    async def _require_restart_safe(self, expected_owner_key: str | None = None) -> str | None:
         try:
-            account_id = await self.observe_work()
+            owner_key = await self.observe_work()
         except Exception as exc:
             try:
-                account_id = await self.accounts._active_account_id_safe()
-                if account_id is None:
-                    account_id = self.accounts.credentials.active_account_hint()
-                exhausted = await self._source_requires_switch(account_id)
+                owner_key = await self.accounts._active_owner_key_safe()
+                if owner_key is None:
+                    owner_key = self.accounts.credentials.active_identity_hint().fingerprint
+                exhausted = await self._source_requires_switch(owner_key)
             except Exception:
                 exhausted = False
             if self._work_running or not exhausted:
                 raise HandoffDeferredError(
                     "Account switch is waiting: conversation state could not be verified. Codex remains open."
                 ) from exc
-        if expected_account_id is not None and account_id != expected_account_id:
+        if expected_owner_key is not None and owner_key != expected_owner_key:
             raise HandoffDeferredError(
                 "Account switch is waiting: the active account changed. Codex remains open."
             )
         for thread_id in self._restart_blockers:
             await self.automation.report(thread_id, "waiting_shared", "desktop_restart")
         if not self._work_verified:
-            eligible = await self.tracker.limited(account_id) if account_id else []
+            eligible = await self.tracker.limited(owner_key) if owner_key else []
             if not self._work_running and (
-                eligible or await self._source_requires_switch(account_id)
+                eligible or await self._source_requires_switch(owner_key)
             ):
                 for thread_id in self._restart_blockers:
                     await self.automation.report(thread_id, "needs_user", "verification")
-                return account_id
+                return owner_key
             raise HandoffDeferredError(
                 "Account switch is waiting: conversation state could not be verified. Codex remains open."
             )
@@ -530,22 +535,27 @@ class ContinuityService:
             raise HandoffDeferredError(
                 "Account switch is waiting for running conversations to finish or report their limit. Codex remains open."
             )
-        return account_id
+        return owner_key
 
-    async def _source_requires_switch(self, account_id: str | None) -> bool:
-        if not account_id:
+    async def _source_requires_switch(self, owner_key: str | None) -> bool:
+        if not owner_key:
             return False
         from codex_account_manager.codex.quota import evaluate_quota
         from codex_account_manager.domain.states import QuotaState
 
         try:
             snapshot = await self.accounts.read_snapshot(paths.shared_codex_home)
-            return snapshot.account_id == account_id and evaluate_quota(snapshot).state in {
-                QuotaState.LIMITED_WITH_RESET,
-                QuotaState.LIMITED_NO_RESET,
-            }
+            return (
+                snapshot.identity is not None
+                and snapshot.identity.fingerprint == owner_key
+                and evaluate_quota(snapshot).state
+                in {
+                    QuotaState.LIMITED_WITH_RESET,
+                    QuotaState.LIMITED_NO_RESET,
+                }
+            )
         except SignInRequiredError:
-            return self.accounts.credentials.active_account_hint() == account_id
+            return self.accounts.credentials.active_identity_hint().fingerprint == owner_key
         except Exception:
             return False
 
@@ -569,17 +579,17 @@ class ContinuityService:
             try:
                 current = await self.observe_work()
             except Exception:
-                current = await self.accounts._active_account_id_safe()
+                current = await self.accounts._active_owner_key_safe()
                 if current is None:
-                    current = self.accounts.credentials.active_account_hint()
+                    current = self.accounts.credentials.active_identity_hint().fingerprint
             if expected is not None and current != expected:
                 raise HandoffDeferredError("The active account changed before the manual switch.")
             return current
 
-        account_id = await verify_source()
+        owner_key = await verify_source()
 
         async def before_desktop_stop() -> None:
-            await verify_source(account_id)
+            await verify_source(owner_key)
             if (
                 await SettingsRepository().get("monitor_enabled", "true") != "true"
                 or self.tracker.generation != generation
@@ -600,7 +610,11 @@ class ContinuityService:
                         ticket = await self.automation.prepare(thread_id, running_goal_only=True)
                     if ticket is None:
                         continue
-                    queued = replace(ticket, account_id=target.bound_account_id)
+                    queued = replace(
+                        ticket,
+                        account_id=target.bound_account_id,
+                        owner_key=target.identity.fingerprint,
+                    )
                     await self.automation.save_pending([queued])
                     pending.append(queued)
                     desktop_threads.append(thread_id)
@@ -611,8 +625,8 @@ class ContinuityService:
         saved = (
             await self.tracker.unfinished()
             if reason == HandoffReason.MANUAL
-            else await self.tracker.limited(account_id)
-            if account_id
+            else await self.tracker.limited(owner_key)
+            if owner_key
             else []
         )
         tickets = []
@@ -643,10 +657,11 @@ class ContinuityService:
                 preparation_failed = True
                 await self.automation.report(thread_id, "needs_user", "preparation")
         target = await self.profiles.get_by_alias(target_alias)
-        if not target or not target.bound_account_id:
+        if not target or not target.identity.owner_key:
             raise AppServerError("The target account identity could not be verified.")
         pending = [
-            replace(t, account_id=target.bound_account_id) for t in desktop_tickets + tickets
+            replace(t, account_id=target.bound_account_id, owner_key=target.identity.fingerprint)
+            for t in desktop_tickets + tickets
         ]
         await self.automation.save_pending(pending)
         try:
@@ -665,21 +680,21 @@ class ContinuityService:
             bus.publish("monitor.refresh_requested")
         except Exception:
             log.warning("Account switch committed; Desktop observations could not be invalidated.")
-        if account_id:
+        if owner_key:
             try:
-                await self.tracker.clear(account_id, [ticket.thread_id for ticket in tickets])
+                await self.tracker.clear(owner_key, [ticket.thread_id for ticket in tickets])
             except Exception:
                 log.warning("Account switch committed; observed work could not be cleared.")
         ready_desktop: list[ContinuationTicket] = []
         deferred_desktop: list[ContinuationTicket] = []
-        if desktop_threads and account_id:
+        if desktop_threads and owner_key:
             try:
                 target = await self.profiles.get_by_alias(target_alias)
-                if not target or not target.bound_account_id:
+                if not target or not target.identity.owner_key:
                     raise AppServerError("The target account identity could not be verified.")
                 await self.tracker.await_desktop(
-                    None if reason == HandoffReason.MANUAL else account_id,
-                    target.bound_account_id,
+                    None if reason == HandoffReason.MANUAL else owner_key,
+                    target.identity.fingerprint or "",
                     desktop_threads,
                     turn_ids={ticket.thread_id: ticket.turn_id for ticket in desktop_tickets},
                 )
@@ -705,7 +720,7 @@ class ContinuityService:
         if tickets:
             try:
                 target = await self.profiles.get_by_alias(target_alias)
-                if not target or not target.bound_account_id:
+                if not target or not target.identity.owner_key:
                     raise AppServerError("The target account identity could not be verified.")
                 self.automation.launch_batch(
                     [
@@ -717,6 +732,7 @@ class ContinuityService:
                             desktop=ticket.desktop,
                             owner_id=ticket.owner_id,
                             resume_active_goal=ticket.resume_active_goal,
+                            owner_key=target.identity.fingerprint,
                         )
                         for ticket in tickets
                     ]

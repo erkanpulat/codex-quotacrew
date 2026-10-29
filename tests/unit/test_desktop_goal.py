@@ -10,6 +10,7 @@ from codex_account_manager.continuity.tracking import goal_signature
 from codex_account_manager.core.errors import ConnectionNotReadyError
 from codex_account_manager.core.events import bus
 from codex_account_manager.storage.database import connect
+from tests.fakes import account_identity
 from tests.unit.test_native_desktop import setup_native
 
 
@@ -101,7 +102,7 @@ async def test_recovered_manual_goal_uses_opening_without_message(
         await owner._claim(ticket)
         await owner._record(ticket, previous_attempt)
     await owner.save_pending([ticket])
-    await owner.recover_pending(ticket.account_id)
+    await owner.recover_pending(account_identity(ticket.account_id).fingerprint)
     await asyncio.gather(*tuple(owner.tasks))
     await finish(owner)
     if previous_attempt in {"uncertain", "submitted"}:
@@ -240,7 +241,9 @@ async def test_old_observer_cannot_finish_replaced_account_request(migrated_db, 
     owner, server, ticket, opened, clock = goal_setup
     await owner._claim(ticket)
     await owner.goal_observer.opened(ticket)
-    replacement = replace(ticket, account_id="new-account")
+    replacement = replace(
+        ticket, owner_key=account_identity(ticket.account_id, "different-user").fingerprint
+    )
     await owner.save_pending([replacement])
     await owner.goal_observer._finish(ticket, "goal_unconfirmed", "needs_user")
     assert await journal_status() == ("goal_opened",)
@@ -251,7 +254,10 @@ async def test_old_observer_cannot_finish_replaced_account_request(migrated_db, 
 async def test_expired_open_is_not_displayed_as_active_wait_after_crash(migrated_db, goal_setup):
     owner, server, ticket, opened, clock = goal_setup
     await owner.tracker.observe(
-        "acc-1", "thread", {"id": "last", "status": "inProgress"}, server.native
+        account_identity("acc-1").fingerprint,
+        "thread",
+        {"id": "last", "status": "inProgress"},
+        server.native,
     )
     await owner._claim(ticket)
     await owner.goal_observer.opened(ticket)

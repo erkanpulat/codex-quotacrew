@@ -304,8 +304,8 @@ class DashboardView(BaseView):
             from codex_account_manager.continuity.tracking import WorkTracker
             from codex_account_manager.storage.repositories import ThreadRepository
 
-            account_id = FileCredentialStore().active_account_hint()
-            work = await WorkTracker().visible(account_id) if account_id else []
+            owner_key = FileCredentialStore().active_identity_hint().fingerprint
+            work = await WorkTracker().visible(owner_key) if owner_key else []
             thread = await ThreadRepository().get(work[0].thread_id) if work else None
             return work, thread
 

@@ -1,6 +1,7 @@
 import sqlite3
 
 from codex_account_manager.storage.migrations import TARGET_VERSION, migrate
+from tests.fakes import account_identity
 
 
 async def test_migrate_creates_all_tables(tmp_paths):
@@ -54,9 +55,12 @@ async def test_observed_work_migration_accepts_earlier_local_schema(tmp_paths):
 
     tracker = WorkTracker()
     await tracker.observe(
-        "account", "new", {"id": "turn", "status": "inProgress"}, GoalInfo("new", None, None, False)
+        account_identity("account").fingerprint,
+        "new",
+        {"id": "turn", "status": "inProgress"},
+        GoalInfo("new", None, None, False),
     )
-    assert await tracker.ids("account") == ["new"]
+    assert await tracker.ids(account_identity("account").fingerprint) == ["new"]
 
 
 async def test_migrate_preserves_existing_data(tmp_paths):
@@ -233,6 +237,7 @@ async def test_pending_quota_intent_survives_manual_goal_migration(tmp_paths):
     await migrate()
     with sqlite3.connect(tmp_paths.db_path) as db:
         db.execute("ALTER TABLE pending_continuations DROP COLUMN resume_active_goal")
+        db.execute("ALTER TABLE pending_continuations DROP COLUMN owner_key")
         db.execute("UPDATE schema_meta SET value='8'")
         db.execute(
             "INSERT INTO pending_continuations VALUES ('thread','turn','account','goal',1,NULL,100)"
@@ -240,5 +245,5 @@ async def test_pending_quota_intent_survives_manual_goal_migration(tmp_paths):
     assert await migrate() == TARGET_VERSION
     with sqlite3.connect(tmp_paths.db_path) as db:
         assert db.execute("SELECT * FROM pending_continuations").fetchall() == [
-            ("thread", "turn", "account", "goal", 1, None, 100.0, 0)
+            ("thread", "turn", "account", "goal", 1, None, 100.0, 0, None)
         ]

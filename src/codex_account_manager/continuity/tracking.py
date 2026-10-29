@@ -24,10 +24,6 @@ def goal_signature(goal: GoalInfo) -> str:
     )
 
 
-def account_hash(account_id: str) -> str:
-    return sha256(account_id.encode()).hexdigest()
-
-
 @dataclass(frozen=True)
 class ObservedWork:
     thread_id: str
@@ -59,7 +55,7 @@ class WorkTracker:
         bus.publish("work.observed")
 
     async def visible(
-        self, account_id: str | None = None, *, verified_only: bool = False
+        self, owner_key: str | None = None, *, verified_only: bool = False
     ) -> list[ObservedWork]:
         from codex_account_manager.continuity.desktop_goal import OBSERVATION_SECONDS
         from codex_account_manager.monitoring.settings import poll_interval
@@ -76,6 +72,7 @@ class WorkTracker:
                     SELECT 1 FROM pending_continuations AS pending
                     WHERE pending.thread_id=observed_work.thread_id
                       AND pending.turn_id=observed_work.turn_id
+                      AND pending.owner_key=observed_work.account_hash
                       AND pending.created_at > ? AND pending.created_at <= ?
                       AND (pending.created_at > ? OR NOT EXISTS (
                           SELECT 1 FROM continuation_attempts AS activation
@@ -102,8 +99,8 @@ class WorkTracker:
                         int(verified_only),
                         now - freshness,
                         now,
-                        account_id,
-                        account_hash(account_id) if account_id else None,
+                        owner_key,
+                        owner_key,
                     ),
                 )
             ).fetchall()
@@ -212,7 +209,7 @@ class WorkTracker:
             )
             await db.commit()
 
-    async def ids(self, account_id: str | None = None) -> list[str]:
+    async def ids(self, owner_key: str | None = None) -> list[str]:
         async with connect() as db:
             await db.execute(
                 "DELETE FROM observed_work WHERE observed_at<?", (time.time() - 86400,)
@@ -221,14 +218,14 @@ class WorkTracker:
             rows = await (
                 await db.execute(
                     "SELECT thread_id FROM observed_work WHERE (? IS NULL OR account_hash=?) ORDER BY observed_at DESC",
-                    (account_id, account_hash(account_id) if account_id else None),
+                    (owner_key, owner_key),
                 )
             ).fetchall()
         return [row[0] for row in rows]
 
     async def observe(
         self,
-        account_id: str,
+        owner_key: str,
         thread_id: str,
         turn: dict | None,
         goal: GoalInfo | None,
@@ -246,10 +243,16 @@ class WorkTracker:
             ).fetchone()
             if generation is not None and generation != WorkTracker.generation:
                 return
-            source = account_hash(account_id)
+            source = owner_key
             status = normalize_turn_status(turn.get("status")) if turn else None
             turn_id = turn.get("id") if turn else None
             signature = goal_signature(goal) if goal is not None else None
+            if row and not row[0].startswith("owner-v1:") and status != "inProgress":
+                await db.execute(
+                    "UPDATE observed_work SET verified=0 WHERE thread_id=?", (thread_id,)
+                )
+                await db.commit()
+                return
             if row and row[0] != source:
                 if status != "inProgress" and limited and signature == row[3]:
                     source = row[0]
@@ -364,11 +367,11 @@ class WorkTracker:
                 WHERE (? IS NULL OR (account_hash=? AND limited=1)) AND thread_id=?""",
                 [
                     (
-                        account_hash(target_account),
+                        target_account,
                         (turn_ids or {}).get(thread_id),
                         time.time(),
-                        account_hash(source_account) if source_account is not None else None,
-                        account_hash(source_account) if source_account is not None else None,
+                        source_account if source_account is not None else None,
+                        source_account if source_account is not None else None,
                         thread_id,
                     )
                     for thread_id in thread_ids
@@ -376,24 +379,24 @@ class WorkTracker:
             )
             await db.commit()
 
-    async def clear(self, account_id: str, thread_ids: list[str]) -> None:
+    async def clear(self, owner_key: str, thread_ids: list[str]) -> None:
         if not thread_ids:
             return
         async with connect() as db:
             await db.executemany(
                 "DELETE FROM observed_work WHERE account_hash=? AND thread_id=?",
-                [(account_hash(account_id), thread_id) for thread_id in thread_ids],
+                [(owner_key, thread_id) for thread_id in thread_ids],
             )
             await db.commit()
 
-    async def limited(self, account_id: str) -> list[tuple[str, str, str]]:
+    async def limited(self, owner_key: str) -> list[tuple[str, str, str]]:
         async with connect() as db:
             rows = await (
                 await db.execute(
                     """SELECT thread_id, turn_id, goal_fingerprint FROM observed_work
                 WHERE account_hash=? AND limited=1 AND verified=1 AND observed_at>=?
                 ORDER BY observed_at DESC""",
-                    (account_hash(account_id), time.time() - 3600),
+                    (owner_key, time.time() - 3600),
                 )
             ).fetchall()
         return [(row[0], row[1], row[2]) for row in rows]

@@ -13,7 +13,7 @@ from codex_account_manager.core.errors import (
     NativeOperationRejectedError,
 )
 from codex_account_manager.storage.database import connect
-from tests.fakes import ExecutionServer
+from tests.fakes import ExecutionServer, account_identity
 
 REAL_EXCHANGE = native._exchange
 
@@ -181,7 +181,12 @@ def setup_native():
     supervisor.native.send = AsyncMock(return_value={"accepted": True})
     supervisor.native.thread_status = AsyncMock(return_value="idle")
     ticket = ContinuationTicket(
-        "thread", "last", "acc-1", goal_signature(GoalInfo("thread", None, None, False)), True
+        "thread",
+        "last",
+        "acc-1",
+        goal_signature(GoalInfo("thread", None, None, False)),
+        True,
+        owner_key=account_identity("acc-1").fingerprint,
     )
     return supervisor, server, source, ticket
 
@@ -544,13 +549,15 @@ async def test_native_delivery_stays_in_desktop_and_tracks_next_account_limit(mi
     assert not server.resume_calls and not server.turn_calls
     assert (await supervisor.tracker.visible())[0].turn_status == "inProgress"
     await supervisor.tracker.observe(
-        "acc-1",
+        account_identity("acc-1").fingerprint,
         "thread",
         {**source, "id": "native-next"},
         GoalInfo("thread", None, None, False),
         limited=True,
     )
-    assert (await supervisor.tracker.limited("acc-1"))[0][1] == "native-next"
+    assert (await supervisor.tracker.limited(account_identity("acc-1").fingerprint))[0][
+        1
+    ] == "native-next"
     supervisor.native.latest_turn.side_effect = None
     supervisor.native.latest_turn.return_value = source
     await supervisor.run(ticket)
@@ -570,7 +577,7 @@ async def test_routing_401_is_reported_as_authentication_not_quota(migrated_db):
     await supervisor.run(ticket)
     supervisor.report.assert_any_await("thread", "needs_user", "authentication")
     supervisor.native.send.assert_awaited_once()
-    assert not await supervisor.tracker.limited("acc-1")
+    assert not await supervisor.tracker.limited(account_identity("acc-1").fingerprint)
 
 
 async def test_routing_401_during_delivery_is_not_replayed(migrated_db):
@@ -589,13 +596,27 @@ async def test_routing_401_during_delivery_is_not_replayed(migrated_db):
 async def test_native_delivery_stops_on_conflicts_and_never_retries_uncertain(migrated_db, fault):
     supervisor, server, source, ticket = setup_native()
     if fault == "account":
-        ticket = ContinuationTicket("thread", "last", "other", ticket.goal_signature, True)
+        ticket = ContinuationTicket(
+            "thread",
+            "last",
+            "other",
+            ticket.goal_signature,
+            True,
+            owner_key=account_identity("other").fingerprint,
+        )
     elif fault == "new_turn":
         supervisor.native.latest_turn.return_value = {**source, "id": "new"}
     elif fault == "running":
         supervisor.native.latest_turn.return_value = {**source, "status": "inProgress"}
     elif fault == "goal":
-        ticket = ContinuationTicket("thread", "last", "acc-1", "changed", True)
+        ticket = ContinuationTicket(
+            "thread",
+            "last",
+            "acc-1",
+            "changed",
+            True,
+            owner_key=account_identity("acc-1").fingerprint,
+        )
     else:
         supervisor.native.send.side_effect = TimeoutError()
     await supervisor.run(ticket)
@@ -775,7 +796,14 @@ async def test_goal_changed_during_desktop_verification_is_not_resumed(migrated_
     original = GoalInfo("thread", "Test objective", "active", True, 1000, 50)
     changed = GoalInfo("thread", "Test objective", status, True, 1000, 50)
     server.get_goal = AsyncMock(side_effect=[original, changed])
-    ticket = ContinuationTicket("thread", "last", "acc-1", goal_signature(original), True)
+    ticket = ContinuationTicket(
+        "thread",
+        "last",
+        "acc-1",
+        goal_signature(original),
+        True,
+        owner_key=account_identity("acc-1").fingerprint,
+    )
     await supervisor.run(ticket)
     supervisor.native.send.assert_not_awaited()
     async with connect() as db:

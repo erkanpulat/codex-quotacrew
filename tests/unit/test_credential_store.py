@@ -1,4 +1,5 @@
 from codex_account_manager.adapters.credential_store import FileCredentialStore
+from tests.fakes import account_auth, account_identity
 
 
 def test_sync_cannot_write_another_accounts_credentials_into_profile(tmp_paths):
@@ -10,12 +11,12 @@ def test_sync_cannot_write_another_accounts_credentials_into_profile(tmp_paths):
     home = tmp_paths.profiles_dir / "p1"
     home.mkdir()
     (home / "auth.json").write_bytes(b"original-profile")
-    store.write_active_atomic(b'{"tokens":{"account_id":"other"}}')
+    store.write_active_atomic(account_auth("expected", "other-user"))
     with pytest.raises(AccountMismatchError):
-        store.sync_active_to_profile(home, expected_account_id="expected")
+        store.sync_active_to_profile(home, expected_identity=account_identity("expected"))
     assert store.read_profile(home) == b"original-profile"
-    store.write_active_atomic(b'{"tokens":{"account_id":"expected"}}')
-    store.sync_active_to_profile(home, expected_account_id="expected")
+    store.write_active_atomic(account_auth("expected"))
+    store.sync_active_to_profile(home, expected_identity=account_identity("expected"))
     assert store.read_profile(home) == store.read_active()
 
 

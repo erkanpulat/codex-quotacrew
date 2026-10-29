@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="44" viewBox="0 0 120 44" role="img" aria-label="Kurulum">
+  <title>Kurulum</title>
+  <rect x="0.5" y="0.5" width="119" height="43" rx="10" fill="#1e2936" stroke="#2b394a"/>
+  <g transform="translate(14 11) scale(.9)" fill="none" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h11l3 3v15H5ZM9 10h6M9 14h6M9 18h4"/></g>
+  <text x="45" y="27" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600">Kurulum</text>
+</svg>

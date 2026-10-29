@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sqlite3
 import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
@@ -64,6 +65,7 @@ class ContinuationTicket:
     desktop: bool = False
     owner_id: str | None = None
     resume_active_goal: bool = False
+    owner_key: str | None = None
 
 
 def goal_allows_continuation(goal: GoalInfo | None) -> bool:
@@ -151,6 +153,19 @@ class ContinuationSupervisor:
             if self._account_readers == 0 and self._account_lock is not None:
                 self._account_lock.__exit__(None, None, None)
                 self._account_lock = None
+
+    async def _account_matches(self, adapter, ticket: ContinuationTicket) -> bool:
+        snapshot = await self.read_account(adapter)
+        return bool(
+            ticket.owner_key
+            and snapshot.identity
+            and snapshot.identity.fingerprint == ticket.owner_key
+            and snapshot.account_id == ticket.account_id
+        )
+
+    @staticmethod
+    async def read_account(adapter):
+        return await adapter.read_account(include_identity=True)
 
     async def enabled(self) -> bool:
         return await SettingsRepository().get("auto_continue", "true") == "true"
@@ -378,7 +393,9 @@ class ContinuationSupervisor:
             return
         async with connect() as db:
             await db.executemany(
-                "INSERT OR REPLACE INTO pending_continuations VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT OR REPLACE INTO pending_continuations
+                (thread_id, turn_id, account_id, goal_signature, desktop, owner_id,
+                 created_at, resume_active_goal, owner_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
                         t.thread_id,
@@ -389,6 +406,7 @@ class ContinuationSupervisor:
                         t.owner_id,
                         time.time(),
                         t.resume_active_goal,
+                        t.owner_key,
                     )
                     for t in tickets
                 ],
@@ -400,17 +418,20 @@ class ContinuationSupervisor:
             return
         async with connect() as db:
             await db.executemany(
-                "DELETE FROM pending_continuations WHERE thread_id=? AND turn_id=?",
-                [(t.thread_id, t.turn_id) for t in tickets],
+                "DELETE FROM pending_continuations WHERE thread_id=? AND turn_id=? AND owner_key IS ?",
+                [(t.thread_id, t.turn_id, t.owner_key) for t in tickets],
             )
             await db.commit()
 
-    async def recover_pending(self, account_id: str | None) -> None:
+    async def recover_pending(self, owner_key: str | None) -> None:
         if self.tasks:
             return
         async with connect() as db:
+            db.row_factory = sqlite3.Row
             rows = await (
-                await db.execute("SELECT * FROM pending_continuations ORDER BY created_at")
+                await db.execute(
+                    "SELECT thread_id, turn_id, account_id, goal_signature, desktop, owner_id, created_at, resume_active_goal, owner_key FROM pending_continuations ORDER BY created_at"
+                )
             ).fetchall()
         if not rows:
             return
@@ -418,14 +439,18 @@ class ContinuationSupervisor:
         ready = []
         for row in rows:
             ticket = ContinuationTicket(
-                row[0],
-                row[1],
-                row[2],
-                row[3],
-                desktop=bool(row[4]),
-                owner_id=row[5],
-                resume_active_goal=bool(row[7]),
+                row["thread_id"],
+                row["turn_id"],
+                row["account_id"],
+                row["goal_signature"],
+                desktop=bool(row["desktop"]),
+                owner_id=row["owner_id"],
+                resume_active_goal=bool(row["resume_active_goal"]),
+                owner_key=row["owner_key"],
             )
+            if not ticket.owner_key:
+                await self.report(ticket.thread_id, "needs_user", "identity")
+                continue
             allowed = enabled and (
                 await self.ide_enabled()
                 if ticket.owner_id
@@ -433,13 +458,13 @@ class ContinuationSupervisor:
                 if ticket.desktop
                 else True
             )
-            if allowed and account_id is None and 0 <= time.time() - row[6] < 600:
+            if allowed and owner_key is None and 0 <= time.time() - row["created_at"] < 600:
                 continue
             if (
                 allowed
-                and account_id
-                and ticket.account_id == account_id
-                and 0 <= time.time() - row[6] < 600
+                and owner_key
+                and ticket.owner_key == owner_key
+                and 0 <= time.time() - row["created_at"] < 600
             ):
                 ready.append(ticket)
             else:
@@ -468,14 +493,14 @@ class ContinuationSupervisor:
                     "DELETE FROM continuation_attempts WHERE thread_id=? AND source_turn_id=? "
                     "AND status IN ('goal_resumed','goal_stopped','goal_unconfirmed') "
                     "AND EXISTS (SELECT 1 FROM pending_continuations "
-                    "WHERE thread_id=? AND turn_id=? AND account_id=? AND goal_signature=? "
+                    "WHERE thread_id=? AND turn_id=? AND owner_key=? AND goal_signature=? "
                     "AND resume_active_goal=1 AND created_at BETWEEN ? AND ?)",
                     (
                         ticket.thread_id,
                         ticket.turn_id,
                         ticket.thread_id,
                         ticket.turn_id,
-                        ticket.account_id,
+                        ticket.owner_key,
                         ticket.goal_signature,
                         time.time() - 600,
                         time.time(),
@@ -544,8 +569,8 @@ class ContinuationSupervisor:
             locks.enter_context(self._account_session())
             await adapter.start()
             stage = "account"
-            account_id = ticket.account_id
-            if not account_id or (await adapter.read_account()).account_id != account_id:
+            owner_key = ticket.owner_key
+            if not await self._account_matches(adapter, ticket):
                 raise AppServerError("The active account changed before continuation.")
             stage = "conversation"
             await adapter.resume_for_continuation(ticket.thread_id)
@@ -570,6 +595,9 @@ class ContinuationSupervisor:
                     raise AppServerError("The goal changed after the interruption was recorded.")
                 if not goal_allows_continuation(goal):
                     break
+                stage = "account"
+                if not await self._account_matches(adapter, ticket):
+                    raise AppServerError("The active account changed before continuation.")
                 stage = "journal"
                 message_id = await self._claim(ticket)
                 if message_id is None:
@@ -589,7 +617,7 @@ class ContinuationSupervisor:
                     turn_id: str, thread_id: str = ticket.thread_id, observed_goal: GoalInfo = goal
                 ) -> None:
                     await self.tracker.observe(
-                        account_id,
+                        owner_key or "",
                         thread_id,
                         {"id": turn_id, "status": "inProgress"},
                         observed_goal,
@@ -610,7 +638,7 @@ class ContinuationSupervisor:
                 current_goal = await adapter.get_goal(ticket.thread_id)
                 if current_goal is not None or status == "interrupted":
                     await self.tracker.observe(
-                        account_id,
+                        owner_key or "",
                         ticket.thread_id,
                         completed,
                         current_goal,
@@ -637,7 +665,11 @@ class ContinuationSupervisor:
                 if goal.status != "active" or not goal_allows_continuation(goal):
                     break
                 ticket = ContinuationTicket(
-                    ticket.thread_id, completed["id"], ticket.account_id, ticket.goal_signature
+                    ticket.thread_id,
+                    completed["id"],
+                    ticket.account_id,
+                    ticket.goal_signature,
+                    owner_key=ticket.owner_key,
                 )
                 # Re-check user settings and persisted turn state before every turn.
                 await asyncio.sleep(0)
@@ -720,10 +752,7 @@ class ContinuationSupervisor:
                 await self.report(ticket.thread_id, "skipped", "checkpoint")
                 return
             stage = "account"
-            if (
-                not ticket.account_id
-                or (await adapter.read_account()).account_id != ticket.account_id
-            ):
+            if not await self._account_matches(adapter, ticket):
                 raise AppServerError("The active account changed before Desktop continuation.")
             stage = "ide" if ticket.owner_id else "desktop"
             goal = await adapter.get_goal(ticket.thread_id)
@@ -754,7 +783,7 @@ class ContinuationSupervisor:
                 and not ticket.owner_id
                 and await self.native.thread_status(ticket.thread_id) == "active"
             ):
-                await self.tracker.observe(ticket.account_id, ticket.thread_id, latest, goal)
+                await self.tracker.observe(ticket.owner_key or "", ticket.thread_id, latest, goal)
                 await self.report(ticket.thread_id, "running", "observation")
                 bus.publish("work.observed")
                 return
@@ -766,7 +795,7 @@ class ContinuationSupervisor:
                 and goal.status == "active"
                 and goal_signature(goal) == ticket.goal_signature
             ):
-                await self.tracker.observe(ticket.account_id, ticket.thread_id, latest, goal)
+                await self.tracker.observe(ticket.owner_key or "", ticket.thread_id, latest, goal)
                 await self.report(ticket.thread_id, "running", "observation")
                 bus.publish("work.observed")
                 return
@@ -778,7 +807,7 @@ class ContinuationSupervisor:
                 workspace = next((t.cwd for t in threads if t.id == ticket.thread_id), None)
                 if not workspace:
                     raise AppServerError("IDE refresh requires an existing local workspace.")
-                if await self.ide_session.needs_refresh(ticket.account_id):
+                if await self.ide_session.needs_refresh(ticket.owner_key or ""):
                     for thread in threads:
                         if thread.source != "vscode" or await adapter.is_desktop_thread(thread.id):
                             continue
@@ -794,7 +823,7 @@ class ContinuationSupervisor:
                                 "IDE refresh is waiting for other conversations or approvals."
                             )
                 await self.report(ticket.thread_id, "refreshing_ide", stage)
-                await self.ide_session.refresh(ticket.account_id, ticket.thread_id, workspace)
+                await self.ide_session.refresh(ticket.owner_key or "", ticket.thread_id, workspace)
                 verified_owner = None
                 stage = "ide"
                 latest = await latest_turn(wait=True)
@@ -808,7 +837,7 @@ class ContinuationSupervisor:
                 raise AppServerError("The Desktop conversation is no longer idle.")
             if not await self.enabled() or not await self._local_allows(ticket.thread_id):
                 return
-            if (await adapter.read_account()).account_id != ticket.account_id:
+            if not await self._account_matches(adapter, ticket):
                 raise AppServerError("The account changed during Desktop verification.")
             final_goal = await adapter.get_goal(ticket.thread_id)
             if final_goal is None or not matches_desktop_interruption(ticket, current, final_goal):
@@ -824,7 +853,7 @@ class ContinuationSupervisor:
                     and normalize_turn_status(refreshed.get("status")) == "inProgress"
                 ):
                     await self.tracker.observe(
-                        ticket.account_id, ticket.thread_id, refreshed, final_goal
+                        ticket.owner_key or "", ticket.thread_id, refreshed, final_goal
                     )
                     await self.report(ticket.thread_id, "running", "observation")
                     bus.publish("work.observed")
@@ -854,7 +883,7 @@ class ContinuationSupervisor:
                 if await self.native.thread_status(ticket.thread_id) == "active":
                     if ticket.resume_active_goal:
                         await self.tracker.observe(
-                            ticket.account_id,
+                            ticket.owner_key or "",
                             ticket.thread_id,
                             {**latest, "status": "inProgress"},
                             final_goal,
@@ -915,7 +944,7 @@ class ContinuationSupervisor:
                         observed_goal = await adapter.get_goal(ticket.thread_id)
                         if observed_goal is not None:
                             await self.tracker.observe(
-                                ticket.account_id,
+                                ticket.owner_key or "",
                                 ticket.thread_id,
                                 turn,
                                 observed_goal,

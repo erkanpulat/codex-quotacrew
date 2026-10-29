@@ -3,10 +3,35 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from dataclasses import replace
 
 from codex_account_manager.adapters.interfaces import CapabilitySet, GoalInfo, ServerInfo
+from codex_account_manager.domain.identity import AccountIdentity, IdentityState
 from codex_account_manager.domain.models import AccountSnapshot, ThreadInfo
+
+
+def account_identity(workspace="acc-1", user="test-user"):
+    return AccountIdentity(user_id=user, workspace_id=workspace, state=IdentityState.COMPLETE)
+
+
+def account_auth(workspace="acc-1", user="test-user", generation=1):
+    claims = {
+        "https://api.openai.com/auth": {"chatgpt_user_id": user, "chatgpt_account_id": workspace}
+    }
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    token = f"header.{payload}.signature"
+    return json.dumps(
+        {
+            "auth_mode": "chatgpt",
+            "tokens": {"account_id": workspace, "id_token": token, "access_token": token},
+            "generation": generation,
+        }
+    ).encode()
+
+
+_DEFAULT_IDENTITY = object()
 
 
 class FakeAppServer:
@@ -29,8 +54,10 @@ class FakeAppServer:
         turns: dict[str, dict] | None = None,
         goals: dict[str, str | None] | None = None,
         fail_on: set[str] | None = None,
+        identity=_DEFAULT_IDENTITY,
     ):
         self.account_id = account_id
+        self._identity = identity
         self.plan = plan
         self.ordinary_usage_allowed = ordinary_usage_allowed
         self.primary = primary
@@ -44,6 +71,16 @@ class FakeAppServer:
         self.set_goal_calls: list[tuple[str, str]] = []
         self.resume_calls: list[str] = []
 
+    @property
+    def identity(self):
+        if self._identity is _DEFAULT_IDENTITY:
+            return account_identity(self.account_id)
+        return self._identity
+
+    @identity.setter
+    def identity(self, value):
+        self._identity = value
+
     async def start(self) -> ServerInfo:
         if "start" in self._fail_on:
             raise RuntimeError("start failed")
@@ -55,7 +92,7 @@ class FakeAppServer:
             methods=frozenset({"account/read", "thread/list", "thread/goal/get", "thread/goal/set"})
         )
 
-    async def read_account(self) -> AccountSnapshot:
+    async def read_account(self, *, include_identity=False) -> AccountSnapshot:
         if "read_account" in self._fail_on:
             raise RuntimeError("read_account failed")
         return AccountSnapshot(
@@ -70,6 +107,7 @@ class FakeAppServer:
             secondary_used_percent=self.secondary,
             secondary_resets_at=1_800_600_000,
             secondary_window_minutes=10080,
+            identity=self.identity,
         )
 
     async def list_threads(

@@ -13,7 +13,7 @@ from codex_account_manager.continuity.tracking import WorkTracker
 from codex_account_manager.core.errors import AppServerError
 from codex_account_manager.domain.models import ThreadInfo
 from codex_account_manager.goals.service import GoalService
-from tests.fakes import FakeAppServer, FakeDesktop
+from tests.fakes import FakeAppServer, FakeDesktop, account_auth, account_identity
 
 
 def _factory(account_id: str):
@@ -48,7 +48,7 @@ def _limited_turn() -> dict:
 
 async def _observed_running(thread_id: str, account_id: str = "acc-1") -> None:
     await WorkTracker().observe(
-        account_id,
+        account_identity(account_id).fingerprint,
         thread_id,
         {"id": "limited-turn", "status": "inProgress"},
         GoalInfo(thread_id, None, None, False),
@@ -59,8 +59,8 @@ async def _seed_two_profiles(migrated_db, accounts: AccountService):
     p1 = await accounts.create_profile("ana")
     p2 = await accounts.create_profile("hesap2")
     for p, acc in ((p1, "acc-1"), (p2, "acc-2")):
-        (migrated_db.profiles_dir / p.id / "auth.json").write_bytes(b"{}")
-        await accounts.profiles.bind_account(p.id, acc)
+        (migrated_db.profiles_dir / p.id / "auth.json").write_bytes(account_auth(acc))
+        await accounts.profiles.bind_account(p.id, acc, user_id="test-user")
     return p1, p2
 
 
@@ -95,19 +95,25 @@ async def test_manual_switch_stops_other_supervisor_without_clearing_tracking(
 
     server.run_continuation_turn = interrupted_turn
     supervisor = ContinuationSupervisor(factory=lambda: server)
-    ticket = replace(await supervisor.prepare("thread"), account_id="acc-1")
+    ticket = replace(
+        await supervisor.prepare("thread"),
+        account_id="acc-1",
+        owner_key=account_identity("acc-1").fingerprint,
+    )
     await supervisor.save_pending([ticket])
     supervisor.launch_batch([ticket])
     await asyncio.wait_for(server.started_turn.wait(), 2)
     service = ContinuityService(accounts=accounts)
     if same_supervisor:
         service.automation = supervisor
-    monkeypatch.setattr(service, "observe_work", AsyncMock(return_value="acc-1"))
+    monkeypatch.setattr(
+        service, "observe_work", AsyncMock(return_value=account_identity("acc-1").fingerprint)
+    )
     desktop = FakeDesktop()
     tx = AuthTransaction(
         credential_store=store,
         desktop=desktop,
-        verify_account=AsyncMock(return_value="acc-2"),
+        verify_account=AsyncMock(return_value=account_identity("acc-2")),
         lock_timeout=0.3,
     )
     try:
@@ -118,11 +124,11 @@ async def test_manual_switch_stops_other_supervisor_without_clearing_tracking(
         )
         result = await asyncio.wait_for(action, 3)
         assert result.success and result.account_id == "acc-2"
-        assert store.read_active() == b"{}"
+        assert store.read_active() == account_auth("acc-2")
         assert desktop.stopped == desktop.launched == 1
         assert len(server.turn_calls) == 1
         assert supervisor._account_readers == 0
-        assert await service.tracker.ids("acc-1") == ["thread"]
+        assert await service.tracker.ids(account_identity("acc-1").fingerprint) == ["thread"]
     finally:
         await supervisor.stop()
 
@@ -195,7 +201,7 @@ async def test_quota_failover_never_stops_desktop_before_work_is_safe(
     store.write_active_atomic(b"original")
 
     async def verify(_home):
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=desktop, verify_account=verify)
     from codex_account_manager.core.errors import HandoffDeferredError
@@ -211,12 +217,12 @@ async def test_unverified_sibling_does_not_block_verified_limit_handoff(migrated
     from unittest.mock import AsyncMock
 
     service = ContinuityService()
-    service.observe_work = AsyncMock(return_value="acc-1")
+    service.observe_work = AsyncMock(return_value=account_identity("acc-1").fingerprint)
     service._work_verified = False
     service._work_running = False
     service._restart_blockers.add("stuck-conversation")
     service.tracker.limited = AsyncMock(return_value=[("limited-conversation", "turn", "goal")])
-    assert await service._require_restart_safe() == "acc-1"
+    assert await service._require_restart_safe() == account_identity("acc-1").fingerprint
 
 
 async def test_unprepared_sibling_does_not_block_verified_limit_handoff(migrated_db):
@@ -230,7 +236,7 @@ async def test_unprepared_sibling_does_not_block_verified_limit_handoff(migrated
     accounts = AccountService(app_server_factory=_factory("acc-2"))
     await _seed_two_profiles(migrated_db, accounts)
     service = ContinuityService(accounts=accounts)
-    service.observe_work = AsyncMock(return_value="acc-1")
+    service.observe_work = AsyncMock(return_value=account_identity("acc-1").fingerprint)
     service._work_verified = True
     service._work_running = False
     service.tracker.limited = AsyncMock(
@@ -267,6 +273,7 @@ async def test_unprepared_sibling_does_not_block_verified_limit_handoff(migrated
         good_ticket.goal_signature,
         good_ticket.desktop,
         good_ticket.owner_id,
+        owner_key=account_identity("acc-2").fingerprint,
     )
 
 
@@ -281,7 +288,7 @@ async def test_all_unreadable_continuations_do_not_veto_account_activation(migra
     accounts = AccountService(app_server_factory=_factory("acc-2"))
     await _seed_two_profiles(migrated_db, accounts)
     service = ContinuityService(accounts=accounts)
-    service.observe_work = AsyncMock(return_value="acc-1")
+    service.observe_work = AsyncMock(return_value=account_identity("acc-1").fingerprint)
     service._work_verified = True
     stopped = [("unreadable", "turn", "goal")]
     service.tracker.limited = AsyncMock(return_value=stopped)
@@ -305,7 +312,7 @@ async def test_changed_account_cannot_pass_unknown_sibling_guard(migrated_db):
     from codex_account_manager.core.errors import HandoffDeferredError
 
     service = ContinuityService()
-    service.observe_work = AsyncMock(return_value="different-account")
+    service.observe_work = AsyncMock(return_value=account_identity("different-account").fingerprint)
     service.tracker.limited = AsyncMock(return_value=[("job", "turn", "goal")])
     with pytest.raises(HandoffDeferredError, match="active account changed"):
         await service._require_restart_safe("original-account")
@@ -361,14 +368,18 @@ async def test_last_restart_check_preserves_work_started_during_handoff(
     source_auth = b'{"tokens":{"account_id":"acc-1"}}'
     store.write_active_atomic(source_auth)
     tx = AuthTransaction(credential_store=store, desktop=desktop)
-    monkeypatch.setattr(AccountService, "_active_account_id_safe", AsyncMock(return_value="acc-1"))
+    monkeypatch.setattr(
+        AccountService,
+        "_active_owner_key_safe",
+        AsyncMock(return_value=account_identity("acc-1").fingerprint),
+    )
 
     async def verify(home, *, force_refresh=False):
         nonlocal turn
         assert Path(home) != migrated_db.shared_codex_home
         if change == "target_verification":
             turn = {"id": "new-user-turn", "status": "inProgress"}
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx._verify = verify
     with pytest.raises(HandoffDeferredError):
@@ -399,7 +410,7 @@ async def test_tracking_picks_verified_limit_over_newer_unrelated_chat(migrated_
     await _observed_running("old")
 
     await ContinuityService().observe_work()
-    assert (await WorkTracker().limited("acc-1"))[0][0] == "old"
+    assert (await WorkTracker().limited(account_identity("acc-1").fingerprint))[0][0] == "old"
     assert options == {"experimental": True}
 
 
@@ -413,7 +424,7 @@ async def test_tracking_skips_unverified_conversations(migrated_db, monkeypatch)
     monkeypatch.setattr(cs, "CodexAppServer", lambda home, **kwargs: fake)
 
     await ContinuityService().observe_work()
-    assert not await WorkTracker().limited("acc-1")
+    assert not await WorkTracker().limited(account_identity("acc-1").fingerprint)
 
 
 @pytest.mark.parametrize("desktop_owned", [False, True])
@@ -438,7 +449,7 @@ async def test_continue_on_limit_carries_active_conversation(
     monkeypatch.setattr(cs, "CodexAppServer", lambda home, **kwargs: fake)
 
     async def verify(_home: str) -> str:
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     service = ContinuityService(accounts=accounts, goals=GoalService())
@@ -466,14 +477,14 @@ async def test_continue_on_limit_carries_active_conversation(
         assert not fake.resume_calls
         assert len(launched) == 1 and launched[0].desktop
         assert (await service.tracker.visible())[0].turn_status == "awaitingDesktop"
-        assert not await service.tracker.limited("acc-2")
+        assert not await service.tracker.limited(account_identity("acc-2").fingerprint)
     else:
         assert not fake.resume_calls
         assert len(launched) == 1 and launched[0].thread_id == "t-live"
     # A preview is not an instruction to create a goal.
     assert fake.set_goal_calls == []
     # New profile's auth is active.
-    assert store.read_active() == b"{}"
+    assert store.read_active() == account_auth("acc-2")
 
 
 async def test_continue_on_limit_without_any_thread(migrated_db, monkeypatch):
@@ -488,7 +499,7 @@ async def test_continue_on_limit_without_any_thread(migrated_db, monkeypatch):
     monkeypatch.setattr(cs, "CodexAppServer", lambda home, **kwargs: fake)
 
     async def verify(_home: str) -> str:
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     service = ContinuityService(accounts=accounts, goals=GoalService())
@@ -496,7 +507,7 @@ async def test_continue_on_limit_without_any_thread(migrated_db, monkeypatch):
     # Should still switch cleanly even with nothing to carry forward.
     result = await service.continue_on_limit("hesap2", transaction=tx)
     assert result.success is True
-    assert store.read_active() == b"{}"
+    assert store.read_active() == account_auth("acc-2")
 
 
 async def test_automatic_work_starts_only_after_committed_handoff(migrated_db, monkeypatch):
@@ -527,13 +538,13 @@ async def test_automatic_work_starts_only_after_committed_handoff(migrated_db, m
 
     async def after_commit(*args, **kwargs):
         assert (await service.recent_handoffs())[0].success is True
-        assert store.read_active() == b"{}"
+        assert store.read_active() == account_auth("acc-2")
         return await original(*args, **kwargs)
 
     execution.run_continuation_turn = after_commit
 
     async def verify(_home):
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     await service.continue_on_limit("hesap2", transaction=tx)
@@ -606,13 +617,13 @@ async def test_conversation_load_failure_does_not_undo_verified_account_switch(
     execution.resume_for_continuation = cannot_resume
 
     async def verify(_home):
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     result = await service.continue_on_limit("hesap2", transaction=tx)
     assert result.success
     assert result.detail is None
-    assert store.read_active() == b"{}"
+    assert store.read_active() == account_auth("acc-2")
     await asyncio.gather(*tuple(service.automation.tasks))
     assert not execution.turn_calls
     handoff = (await service.recent_handoffs())[0]
@@ -653,12 +664,12 @@ async def test_history_write_failure_after_commit_does_not_report_switch_failure
     service.handoffs.save = fail_after_commit
 
     async def verify(_home):
-        return "acc-2"
+        return account_identity("acc-2")
 
     tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
     result = await service.handoff("hesap2", transaction=tx)
     assert result.success
-    assert store.read_active() == b"{}"
+    assert store.read_active() == account_auth("acc-2")
     assert calls == 2
 
 
@@ -713,7 +724,7 @@ async def test_manual_switch_continues_only_verified_quota_interruptions(
 
     async def verify(_home):
         fake.account_id = "acc-2"
-        return "acc-2"
+        return account_identity("acc-2")
 
     desktop = FakeDesktop()
     tx = AuthTransaction(credential_store=store, desktop=desktop, verify_account=verify)
@@ -784,7 +795,7 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
 
         async def verify(_home, target=target):
             fake.account_id = target
-            return target
+            return account_identity(target)
 
         tx = AuthTransaction(credential_store=store, desktop=FakeDesktop(), verify_account=verify)
         result = await service.continue_on_limit(alias, transaction=tx)
@@ -796,7 +807,7 @@ async def test_two_desktop_handoffs_keep_goal_and_follow_new_account(migrated_db
         assert sends[-1] == ("t-live", source_id, target)
         tracked = await service.tracker.visible()
         assert len(tracked) == 1 and tracked[0].turn_status == "inProgress"
-        assert not await service.tracker.limited(target)
+        assert not await service.tracker.limited(account_identity(target).fingerprint)
     assert len(sends) == 2
     assert not fake.resume_calls and not fake.set_goal_calls
     assert native_goal.token_budget == 5000 and native_goal.tokens_used == 100
@@ -853,7 +864,10 @@ async def test_manual_switch_preserves_live_goals_without_quota_error(
     service.automation.factory = lambda: fake
     if blocked_goal in {"unavailable", "large"}:
         await service.tracker.observe(
-            "acc-1", "goal-one", fake._turns["goal-one"], goals["goal-one"]
+            account_identity("acc-1").fingerprint,
+            "goal-one",
+            fake._turns["goal-one"],
+            goals["goal-one"],
         )
     if blocked_goal == "late":
         original_handoff = service.handoff
@@ -915,7 +929,7 @@ async def test_manual_switch_preserves_live_goals_without_quota_error(
 
     async def verify(_home):
         fake.account_id = "acc-2"
-        return "acc-2"
+        return account_identity("acc-2")
 
     desktop = Desktop()
     result = await service.continue_on_limit(
@@ -1059,7 +1073,7 @@ async def test_two_desktop_and_one_ide_limit_continue_after_committed_switch(
 
     async def verify(_home):
         fake.account_id = "acc-2"
-        return "acc-2"
+        return account_identity("acc-2")
 
     transaction = AuthTransaction(
         credential_store=store, desktop=FakeDesktop(), verify_account=verify
@@ -1072,9 +1086,7 @@ async def test_two_desktop_and_one_ide_limit_continue_after_committed_switch(
     observed = {work.thread_id: work for work in await service.tracker.visible()}
     assert all(observed[tid].turn_status == "inProgress" for tid in sends)
     if ide_failure is not None:
-        from codex_account_manager.continuity.tracking import account_hash
-
-        assert observed["vscode"].account_hash == account_hash("acc-1")
+        assert observed["vscode"].account_hash == account_identity("acc-1").fingerprint
         assert observed["vscode"].verified == (ide_failure in {"running", "preparation"})
-    assert not await service.tracker.limited("acc-2")
+    assert not await service.tracker.limited(account_identity("acc-2").fingerprint)
     assert not fake.resume_calls and not fake.set_goal_calls

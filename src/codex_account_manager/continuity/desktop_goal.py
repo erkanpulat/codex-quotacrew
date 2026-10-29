@@ -47,9 +47,9 @@ class DesktopGoalObserver:
                     JOIN pending_continuations AS pending
                       ON pending.thread_id=attempt.thread_id AND pending.turn_id=attempt.source_turn_id
                     WHERE attempt.thread_id=? AND attempt.source_turn_id=?
-                      AND pending.account_id=? AND pending.goal_signature=?
+                      AND pending.owner_key=? AND pending.goal_signature=?
                       AND attempt.status IN ('goal_opened', 'goal_reopened')""",
-                    (ticket.thread_id, ticket.turn_id, ticket.account_id, ticket.goal_signature),
+                    (ticket.thread_id, ticket.turn_id, ticket.owner_key, ticket.goal_signature),
                 )
             ).fetchone()
         return (row[0], row[1]) if row else None
@@ -62,7 +62,9 @@ class DesktopGoalObserver:
                 (ticket.thread_id, ticket.turn_id),
             )
             await db.execute(
-                "INSERT OR REPLACE INTO pending_continuations VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                """INSERT OR REPLACE INTO pending_continuations
+                (thread_id, turn_id, account_id, goal_signature, desktop, owner_id,
+                 created_at, resume_active_goal, owner_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     ticket.thread_id,
                     ticket.turn_id,
@@ -72,6 +74,7 @@ class DesktopGoalObserver:
                     None,
                     time.time(),
                     ticket.resume_active_goal,
+                    ticket.owner_key,
                 ),
             )
             await db.commit()
@@ -133,20 +136,20 @@ class DesktopGoalObserver:
                 "AND EXISTS (SELECT 1 FROM pending_continuations AS pending "
                 "WHERE pending.thread_id=continuation_attempts.thread_id "
                 "AND pending.turn_id=continuation_attempts.source_turn_id "
-                "AND pending.account_id=? AND pending.goal_signature=?)",
+                "AND pending.owner_key=? AND pending.goal_signature=?)",
                 (
                     status,
                     ticket.thread_id,
                     ticket.turn_id,
-                    ticket.account_id,
+                    ticket.owner_key,
                     ticket.goal_signature,
                 ),
             )
             if not updated.rowcount:
                 return
             await db.execute(
-                "DELETE FROM pending_continuations WHERE thread_id=? AND turn_id=? AND account_id=?",
-                (ticket.thread_id, ticket.turn_id, ticket.account_id),
+                "DELETE FROM pending_continuations WHERE thread_id=? AND turn_id=? AND owner_key=?",
+                (ticket.thread_id, ticket.turn_id, ticket.owner_key),
             )
             await db.commit()
         await self.owner.report(ticket.thread_id, event, "goal_activation")
@@ -176,12 +179,15 @@ class DesktopGoalObserver:
                     or not await owner._local_allows(ticket.thread_id)
                 ):
                     return "stopped"
-                account = await adapter.read_account()
+                account = await owner.read_account(adapter)
                 goal = await adapter.get_goal(ticket.thread_id)
                 if goal is None:
                     raise AppServerError("Goal state could not be verified.")
                 if (
-                    account.account_id != ticket.account_id
+                    not ticket.owner_key
+                    or not account.identity
+                    or account.identity.fingerprint != ticket.owner_key
+                    or account.account_id != ticket.account_id
                     or not goal.present
                     or goal.status != "active"
                     or not goal_allows_continuation(goal)
@@ -199,7 +205,7 @@ class DesktopGoalObserver:
                         and turn.get("status") == "inProgress"
                     ):
                         await owner.tracker.observe(
-                            ticket.account_id or "", ticket.thread_id, turn, goal
+                            ticket.owner_key or "", ticket.thread_id, turn, goal
                         )
                     bus.publish("monitor.refresh_requested")
                     return "running"
@@ -208,7 +214,7 @@ class DesktopGoalObserver:
                 if turn.get("id") != ticket.turn_id:
                     if normalize_turn_status(turn.get("status")) == "completed":
                         await owner.tracker.observe(
-                            ticket.account_id or "", ticket.thread_id, turn, goal
+                            ticket.owner_key or "", ticket.thread_id, turn, goal
                         )
                         return "completed"
                     return "stopped"
@@ -238,12 +244,12 @@ class DesktopGoalObserver:
                             "AND EXISTS (SELECT 1 FROM pending_continuations AS pending "
                             "WHERE pending.thread_id=continuation_attempts.thread_id "
                             "AND pending.turn_id=continuation_attempts.source_turn_id "
-                            "AND pending.account_id=? AND pending.goal_signature=? "
+                            "AND pending.owner_key=? AND pending.goal_signature=? "
                             "AND pending.created_at BETWEEN ? AND ?)",
                             (
                                 ticket.thread_id,
                                 ticket.turn_id,
-                                ticket.account_id,
+                                ticket.owner_key,
                                 ticket.goal_signature,
                                 time.time() - OBSERVATION_SECONDS,
                                 time.time(),

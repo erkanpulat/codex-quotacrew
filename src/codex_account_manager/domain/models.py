@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from codex_account_manager.domain.identity import AccountIdentity, IdentityState
 from codex_account_manager.domain.states import GoalState, HandoffReason, QuotaState
 
 
@@ -29,7 +30,20 @@ class Profile(BaseModel):
     alias: str
     codex_home: str
     bound_account_id: str | None = None
+    bound_user_id: str | None = Field(default=None, repr=False)
     created_at: datetime = Field(default_factory=_now)
+
+    @property
+    def identity(self) -> AccountIdentity:
+        return AccountIdentity(
+            workspace_id=self.bound_account_id,
+            user_id=self.bound_user_id,
+            state=IdentityState.COMPLETE
+            if self.bound_account_id and self.bound_user_id
+            else IdentityState.PARTIAL
+            if self.bound_account_id
+            else IdentityState.UNKNOWN,
+        )
 
 
 class ResetCredit(BaseModel):
@@ -66,6 +80,7 @@ class AccountSnapshot:
     subscription_until: datetime | None = None
     subscription_checked_at: datetime | None = None
     reset_credits: ResetCredits | None = None
+    identity: AccountIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +109,7 @@ class ProfileHealth:
     reauth_required: bool = False
     primary_window_minutes: int | None = None
     secondary_window_minutes: int | None = None
+    identity: AccountIdentity | None = None
 
 
 @dataclass(frozen=True)
