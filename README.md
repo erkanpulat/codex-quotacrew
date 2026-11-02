@@ -10,14 +10,19 @@
 
 A free, open-source Windows account manager for Codex Desktop and VS Code. Manage accounts, quotas and work in one window; enable automatic continuation and optional shutdown to suit your workflow.
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download for Windows" /></a>
-<a href="#continuation-flow"><img src="docs/images/navigation/flow-en.svg" width="152" height="44" alt="How it works" /></a>
-<a href="#get-started"><img src="docs/images/navigation/setup-en.svg" width="140" height="44" alt="Get started" /></a>
-<a href="README.tr.md"><img src="docs/images/navigation/language-en.svg" width="112" height="44" alt="Türkçe" /></a>
+<p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><img src="docs/images/navigation/store-live-en.svg" width="720" height="112" alt="Now on Microsoft Store" /></a></p>
+
+<div>
+<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><img src="docs/images/navigation/store-en.svg" width="246" height="44" alt="Get QuotaCrew for Codex from Microsoft Store" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download from GitHub" /></a>
+</div>
+
+[How it works](#continuation-flow) · [Get started](#get-started) · [Türkçe](README.tr.md)
 
 Windows · English / Türkçe · Light & dark themes · MIT
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=Total%20downloads&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="Total GitHub release asset downloads" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=GitHub%20downloads&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release asset downloads" /></a>
+<br><sub>Microsoft Store downloads are not included.</sub>
 
 </div>
 
@@ -55,7 +60,7 @@ The plan badge can also show the subscription-period date recorded at sign-in wh
 
 **Python included · No Node.js required · Existing Codex history preserved**
 
-1. **Download and install.** Get `QuotaCrew-Setup-0.4.0.exe` from the [latest release](https://github.com/erkanpulat/codex-quotacrew/releases/latest) and install it. For portable use, download `QuotaCrew-portable-0.4.0.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
+1. **Download and install.** Get QuotaCrew from [Microsoft Store](https://apps.microsoft.com/detail/9NM4VKLKS9PF), or install `QuotaCrew-Setup-0.4.0.exe` from the [latest GitHub release](https://github.com/erkanpulat/codex-quotacrew/releases/latest). For portable use, download `QuotaCrew-portable-0.4.0.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
 2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
 3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
 
@@ -72,7 +77,7 @@ New installations select monitoring and automatic account switching. You can cha
 
 Enable **Keep running in the tray** to continue monitoring after closing the window. **Pause** stops automatic switching, work tracking and continuation; account information continues refreshing at the configured interval (60 seconds by default). Starting with Windows is a separate preference. A cancelled sign-in can be retried from the account's actions menu.
 
-Windows packages are not code-signed. `SHA256SUMS.txt` contains the release file checksums.
+GitHub release packages are not code-signed. `SHA256SUMS.txt` contains their file checksums.
 
 </details>
 
@@ -170,7 +175,9 @@ Archived, cloud-only and other-device conversations are excluded from the local 
 
 ## Updates
 
-Installed copies check for newer stable releases once a day when automatic checks are enabled. Open **Settings → Updates**, read the release notes and choose **Update**: the package downloads, its size and SHA-256 are checked, data is backed up and only QuotaCrew restarts. Installation waits for active account operations or pending continuation to finish.
+Microsoft Store installations receive updates through Microsoft Store. Manage automatic updates in Store settings.
+
+Copies installed with the GitHub installer check for newer stable releases once a day when automatic checks are enabled. Open **Settings → Updates**, read the release notes and choose **Update**: the package downloads, its size and SHA-256 are checked, data is backed up and only QuotaCrew restarts. Installation waits for active account operations or pending continuation to finish.
 
 <details>
 <summary>The update screen and keeping packages tidy</summary>
@@ -195,7 +202,10 @@ QuotaCrew has no telemetry or credential proxy. Codex connects to OpenAI for sig
 
 Download the Windows package, add your accounts and choose which steps to automate.
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download for Windows" /></a>
+<div>
+<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><img src="docs/images/navigation/store-en.svg" width="246" height="44" alt="Get QuotaCrew for Codex from Microsoft Store" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download from GitHub" /></a>
+</div>
 
 ---
 

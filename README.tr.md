@@ -10,14 +10,19 @@
 
 Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneticisi. Hesaplarını, kotalarını ve işlerini tek pencereden yönet; otomatik devamı ve isteğe bağlı kapatmayı ihtiyacına göre aç.
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="Windows için indir" /></a>
-<a href="#devam-akışı"><img src="docs/images/navigation/flow-tr.svg" width="152" height="44" alt="Nasıl çalışır?" /></a>
-<a href="#kurulum"><img src="docs/images/navigation/setup-tr.svg" width="120" height="44" alt="Kurulum" /></a>
-<a href="README.md"><img src="docs/images/navigation/language-tr.svg" width="112" height="44" alt="English" /></a>
+<p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><img src="docs/images/navigation/store-live-tr.svg" width="720" height="112" alt="Microsoft Store'da yayında" /></a></p>
+
+<div>
+<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><img src="docs/images/navigation/store-tr.svg" width="226" height="44" alt="QuotaCrew for Codex'i Microsoft Store'dan edinin" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="GitHub’dan indir" /></a>
+</div>
+
+[Nasıl çalışır?](#devam-akışı) · [Kurulum](#kurulum) · [English](README.md)
 
 Windows · Türkçe / English · Açık ve koyu tema · MIT
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=Toplam%20indirme&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release dosyalarının toplam indirme sayısı" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=GitHub%20indirmeleri&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release dosyalarının indirme sayısı" /></a>
+<br><sub>Microsoft Store indirmeleri bu sayıya dahil değildir.</sub>
 
 </div>
 
@@ -51,7 +56,7 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve kurun.** [Son sürüm](https://github.com/erkanpulat/codex-quotacrew/releases/latest) sayfasından `QuotaCrew-Setup-0.4.0.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.0.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.0.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.0.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 
@@ -68,7 +73,7 @@ Yeni kurulumlarda izleme ve otomatik hesap geçişi seçilidir. Tercihlerinizi i
 
 Pencere kapandıktan sonra izlemenin sürmesi için **Tepside çalışmaya devam et** seçeneğini açın. **Duraklat**, otomatik geçişi, iş takibini ve devam işlemlerini durdurur; hesap bilgileri ayarlanan aralıkla (varsayılan 60 saniye) yenilenmeye devam eder. Windows ile başlatma ayrı bir tercihtir. İptal edilen hesap girişini ilgili hesabın işlem menüsünden yeniden başlatabilirsiniz.
 
-Windows paketleri kod imzalı değildir. `SHA256SUMS.txt`, sürüm dosyalarının doğrulama değerlerini içerir.
+GitHub sürüm paketleri kod imzalı değildir. `SHA256SUMS.txt`, bu dosyaların doğrulama değerlerini içerir.
 
 </details>
 
@@ -166,7 +171,9 @@ Arşivlenmiş, yalnızca bulutta veya başka cihazda bulunan konuşmalar yerel l
 
 ## Güncellemeler
 
-Kurulu uygulama, otomatik kontrol açıkken yeni kararlı sürümleri günde bir kontrol eder. **Ayarlar → Güncellemeler** bölümünden sürüm notlarını inceleyip **Güncelle**'ye basın: paket indirilir, boyutu ve SHA-256 değeri doğrulanır, veriler yedeklenir ve yalnızca QuotaCrew yeniden başlar. Hesap işlemleri veya bekleyen devam işlemleri varsa kurulum ertelenir.
+Microsoft Store kurulumları Microsoft Store üzerinden güncellenir. Otomatik güncellemeleri Store ayarlarından yönetebilirsiniz.
+
+GitHub kurulum paketiyle yüklenen uygulama, otomatik kontrol açıkken yeni kararlı sürümleri günde bir kontrol eder. **Ayarlar → Güncellemeler** bölümünden sürüm notlarını inceleyip **Güncelle**'ye basın: paket indirilir, boyutu ve SHA-256 değeri doğrulanır, veriler yedeklenir ve yalnızca QuotaCrew yeniden başlar. Hesap işlemleri veya bekleyen devam işlemleri varsa kurulum ertelenir.
 
 <details>
 <summary>Güncelleme ekranı ve paketlerin temiz tutulması</summary>
@@ -191,7 +198,10 @@ QuotaCrew telemetri toplamaz veya giriş bilgilerinizi kendi sunucusuna gönderm
 
 Windows paketini indirin, hesaplarınızı ekleyin ve hangi adımların otomatik olacağını seçin.
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="Windows için indir" /></a>
+<div>
+<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><img src="docs/images/navigation/store-tr.svg" width="226" height="44" alt="QuotaCrew for Codex'i Microsoft Store'dan edinin" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="GitHub’dan indir" /></a>
+</div>
 
 ---
 

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="112" viewBox="0 0 720 112" role="img" aria-labelledby="title">
+  <title id="title">Now on Microsoft Store</title>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1"><stop stop-color="#17283d"/><stop offset="1" stop-color="#101923"/></linearGradient>
+    <linearGradient id="icon" x2="1" y2="1"><stop stop-color="#2681f4"/><stop offset="1" stop-color="#0f6cbd"/></linearGradient>
+  </defs>
+  <rect x="0.75" y="0.75" width="718.5" height="110.5" rx="20" fill="url(#background)" stroke="#31577e" stroke-width="1.5"/>
+  <path d="M570 1 498 111M650 1 578 111" stroke="#2681f4" stroke-opacity=".1" stroke-width="2"/>
+  <rect x="1" y="36" width="4" height="40" rx="2" fill="#31d4a1"/>
+  <g transform="translate(124.0 24)">
+    <rect width="64" height="64" rx="16" fill="url(#icon)"/>
+    <g transform="translate(16 16)" fill="white"><rect width="14" height="14"/><rect x="18" width="14" height="14"/><rect y="18" width="14" height="14"/><rect x="18" y="18" width="14" height="14"/></g>
+  </g>
+  <text x="212.0" y="68" fill="#f3f7fc" font-family="Segoe UI,Arial,sans-serif" font-size="34" font-weight="700">Now on Microsoft Store</text>
+</svg>
