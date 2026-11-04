@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from codex_account_manager.continuity.policy import resolve_policy
 from codex_account_manager.core.events import bus
 from codex_account_manager.domain.models import ProfileHealth
-from codex_account_manager.domain.states import QuotaState, SwitchPolicyKind
+from codex_account_manager.domain.states import HandoffReason, QuotaState, SwitchPolicyKind
 from codex_account_manager.monitoring.watcher import Watcher
 from tests.fakes import account_identity
 
@@ -593,3 +593,101 @@ async def test_same_workspace_user_change_during_first_poll_discards_stale_healt
     await watcher.poll_once()
     assert not continuity.continued
     continuity.automation.recover_pending.assert_not_awaited()
+
+
+async def test_smart_switch_rechecks_target_and_passes_explanation():
+    from dataclasses import replace
+    from datetime import timedelta
+    from unittest.mock import AsyncMock
+
+    now = datetime.now(UTC)
+
+    def candidate(alias, weekly_used, hours):
+        return replace(
+            _health(alias, secondary=weekly_used),
+            primary_used_percent=25,
+            primary_resets_at=int((now + timedelta(hours=3)).timestamp()),
+            secondary_resets_at=int((now + timedelta(hours=hours)).timestamp()),
+        )
+
+    source = _health("source", active=True, allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    first = candidate("first", 80, 2)
+    second = candidate("second", 40, 72)
+
+    class Accounts(_StubAccounts):
+        async def health(self, alias):
+            return replace(first, stale=True) if alias == "first" else second
+
+    continuity = _FakeContinuity()
+    continuity.continue_on_limit = AsyncMock()
+    watcher = Watcher(
+        accounts=Accounts([source, first, second]),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.SMART_QUOTA),
+    )
+    await watcher.poll_once()
+    continuity.continue_on_limit.assert_awaited_once_with(
+        "second",
+        reason=HandoffReason.USAGE_LIMITED,
+        selection_reason="Smart switching balanced available quota with upcoming resets.",
+    )
+
+
+async def test_smart_reranks_when_fresh_target_loses_reserve():
+    from dataclasses import replace
+    from datetime import timedelta
+    from unittest.mock import AsyncMock
+
+    now = datetime.now(UTC)
+
+    def candidate(alias, used, hours):
+        return replace(
+            _health(alias, secondary=used),
+            primary_used_percent=25,
+            primary_resets_at=int((now + timedelta(hours=3)).timestamp()),
+            secondary_resets_at=int((now + timedelta(hours=hours)).timestamp()),
+        )
+
+    source = _health("source", active=True, allowed=False, quota=QuotaState.LIMITED_NO_RESET)
+    first = candidate("first", 80, 2)
+    second = candidate("second", 40, 72)
+
+    class Accounts(_StubAccounts):
+        async def health(self, alias):
+            return replace(first, secondary_used_percent=99) if alias == "first" else second
+
+    continuity = _FakeContinuity()
+    continuity.continue_on_limit = AsyncMock()
+    watcher = Watcher(
+        accounts=Accounts([source, first, second]),
+        continuity=continuity,
+        policy=resolve_policy(SwitchPolicyKind.SMART_QUOTA),
+    )
+    await watcher.poll_once()
+    assert continuity.continue_on_limit.await_args.args == ("second",)
+
+
+async def test_smart_selection_reason_is_saved_in_handoff_history(migrated_db):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.accounts.service import AccountService
+    from codex_account_manager.continuity.service import ContinuityService
+    from codex_account_manager.domain.states import TransactionStage
+
+    accounts = AccountService()
+    await accounts.create_profile("target")
+    service = ContinuityService(accounts=accounts)
+    transaction = SimpleNamespace(
+        switch=AsyncMock(return_value=SimpleNamespace(final_stage=TransactionStage.COMMIT))
+    )
+    explanation = "Smart switching balanced available quota with upcoming resets."
+    await service.handoff(
+        "target",
+        reason=HandoffReason.USAGE_LIMITED,
+        transaction=transaction,
+        selection_reason=explanation,
+    )
+    records = await service.recent_handoffs()
+    assert records[0].success is True
+    assert records[0].detail == explanation

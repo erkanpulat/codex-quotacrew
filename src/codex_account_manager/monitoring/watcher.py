@@ -142,7 +142,11 @@ class Watcher:
             log.info("Switch suggested: %s", decision.reason)
             return
         health_reader = getattr(self.accounts, "health", None)
+        checked: set[str] = set()
         while health_reader is not None:
+            if decision.target.profile_id in checked:
+                break
+            target_id = decision.target.profile_id
             try:
                 target_health = await health_reader(decision.target.alias)
             except Exception:
@@ -154,8 +158,23 @@ class Watcher:
                 and target_health.ordinary_usage_allowed is True
                 and automatic_exclusion_reason(target_health) is None
             ):
+                if self.policy.kind == SwitchPolicyKind.SMART_QUOTA:
+                    checked.add(target_health.profile_id)
+                    # Re-rank with the fresh quota snapshot: the target may have
+                    # crossed the reserve threshold since the initial poll.
+                    candidates = [
+                        target_health if c.profile_id == target_health.profile_id else c
+                        for c in candidates
+                    ]
+                    refreshed = self.policy.decide(current, candidates)
+                    if refreshed.target is None or not refreshed.should_switch:
+                        return
+                    if refreshed.target.profile_id != target_health.profile_id:
+                        decision = refreshed
+                        continue
+                    decision = refreshed
                 break
-            candidates = [c for c in candidates if c.profile_id != decision.target.profile_id]
+            candidates = [c for c in candidates if c.profile_id != target_id]
             decision = self.policy.decide(current, candidates)
             if not decision.should_switch or decision.target is None:
                 bus.publish(
@@ -168,7 +187,16 @@ class Watcher:
         key = (source, decision.target.profile_id)
         log.info("Policy failover: %s", decision.reason)
         try:
-            if current is not None and current.reauth_required:
+            if self.policy.kind == SwitchPolicyKind.SMART_QUOTA:
+                reason = (
+                    HandoffReason.AUTH_EXPIRED
+                    if current is not None and current.reauth_required
+                    else HandoffReason.USAGE_LIMITED
+                )
+                await self.continuity.continue_on_limit(
+                    decision.target.alias, reason=reason, selection_reason=decision.reason
+                )
+            elif current is not None and current.reauth_required:
                 await self.continuity.continue_on_limit(
                     decision.target.alias,
                     reason=HandoffReason.AUTH_EXPIRED,

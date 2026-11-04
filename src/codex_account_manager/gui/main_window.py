@@ -573,6 +573,9 @@ class MainWindow(QMainWindow):
             "availability_failover": tr(
                 "Automatic mode · A limited account is replaced when verified capacity is available."
             ),
+            "smart_quota": tr(
+                "Smart switching considers available quota and upcoming resets when a switch is needed."
+            ),
         }
         message = messages.get(mode, messages["manual"])
         if not self._monitor_enabled:
@@ -583,12 +586,13 @@ class MainWindow(QMainWindow):
             "manual": "Manual switching",
             "confirm": "Ask before switching",
             "availability_failover": "Automatic switching",
+            "smart_quota": "Smart switching (quota and reset times)",
         }
         short = tr(titles.get(mode, "Manual switching"))
         if not self._monitor_enabled:
             short = tr("Monitoring off")
         self.dashboard.set_automation(mode, self._monitor_enabled, self.settings.interval.value())
-        if self._monitor_enabled and mode == "availability_failover":
+        if self._monitor_enabled and mode in {"availability_failover", "smart_quota"}:
             short = tr("Automatic account switching is on")
         self.dashboard.mode_label.setText(short)
         if hasattr(self, "global_status"):

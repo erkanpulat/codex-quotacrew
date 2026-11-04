@@ -71,6 +71,8 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 Yeni kurulumlarda izleme ve otomatik hesap geçişi seçilidir. Tercihlerinizi ilk açılışta ve daha sonra **Ayarlar**'da değiştirebilirsiniz. Hesap geçişi Codex Desktop'ı yeniden başlatır; çalışmalarınızı kaydedin.
 
+İsteğe bağlı, sıfırlanma zamanlarını dikkate alan seçenek için **Akıllı geçiş (kota ve yenilenme zamanına göre)** ayarını seçin. Geçiş gerektiğinde kalan kota ve yaklaşan sıfırlanmalar birlikte değerlendirilir; her iki pencerede en az %15 kalan hesaplar önceliklidir. Sıfırlanma bilgisi güvenilir değilse veya hiçbir hesap bu rezervi karşılamıyorsa kullanılabilir kotaya göre seçim yapılır. Rezerv sezgisel bir değerdir; görevin tamamlanacağını garanti etmez.
+
 Pencere kapandıktan sonra izlemenin sürmesi için **Tepside çalışmaya devam et** seçeneğini açın. **Duraklat**, otomatik geçişi, iş takibini ve devam işlemlerini durdurur; hesap bilgileri ayarlanan aralıkla (varsayılan 60 saniye) yenilenmeye devam eder. Windows ile başlatma ayrı bir tercihtir. İptal edilen hesap girişini ilgili hesabın işlem menüsünden yeniden başlatabilirsiniz.
 
 GitHub sürüm paketleri kod imzalı değildir. `SHA256SUMS.txt`, bu dosyaların doğrulama değerlerini içerir.

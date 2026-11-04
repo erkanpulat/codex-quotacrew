@@ -2545,3 +2545,60 @@ def test_automatic_failure_does_not_release_pending_manual_switch(window):
     window._domain_event(Event("switch.failed", {"detail": "rejected"}))
     assert window._switching
     assert not window.dashboard.isEnabled()
+
+
+async def test_smart_policy_setting_saved_and_reloaded(window, migrated_db, monkeypatch):
+    from codex_account_manager.storage.repositories import SettingsRepository
+
+    pending = []
+    monkeypatch.setattr(window.runner, "submit", lambda coro, *_args: pending.append(coro))
+    index = window.settings.policy.findData("smart_quota")
+    assert index >= 0
+    window.settings._loaded({"switch_policy": "availability_failover"})
+    window.settings.policy.setCurrentIndex(index)
+    assert len(pending) == 1
+    await pending.pop()
+    saved = await SettingsRepository().all()
+    assert saved["switch_policy"] == "smart_quota"
+    window.settings._loaded(saved)
+    assert window.settings.policy.currentData() == "smart_quota"
+
+
+def test_smart_mode_reports_automatic_switching(window):
+    from codex_account_manager.gui.i18n import tr
+
+    window.settings._loaded({"switch_policy": "smart_quota", "monitor_enabled": "true"})
+    assert window.global_status.text() == tr("Automatic account switching is on")
+    assert window.dashboard.mode_label.toolTip() == tr(
+        "Smart switching considers available quota and upcoming resets when a switch is needed."
+    )
+
+
+def test_smart_preview_matches_policy_before_and_after_limit(window):
+    from dataclasses import replace
+    from datetime import UTC, datetime, timedelta
+
+    from codex_account_manager.continuity.policy import resolve_policy
+    from codex_account_manager.domain.states import QuotaState
+    from tests.unit.test_policy import _health
+
+    now = datetime.now(UTC)
+    current = _health("current", active=True)
+    candidates = [
+        replace(
+            _health(alias, primary=25, secondary=used),
+            primary_resets_at=int((now + timedelta(hours=3)).timestamp()),
+            secondary_resets_at=int((now + timedelta(hours=hours)).timestamp()),
+        )
+        for alias, used, hours in [("soon", 80, 2), ("later", 40, 72)]
+    ]
+    view = window.dashboard
+    view.set_automation("smart_quota", True, 60)
+    for source in (
+        current,
+        replace(current, ordinary_usage_allowed=False, quota_state=QuotaState.LIMITED_NO_RESET),
+    ):
+        view._render([source, *candidates])
+        assert not view._account_rows["soon"]._candidate.isHidden()
+        assert view._account_rows["later"]._candidate.isHidden()
+    assert resolve_policy("smart_quota").decide(source, candidates).target.alias == "soon"
