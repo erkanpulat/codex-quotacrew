@@ -2545,3 +2545,20 @@ def test_automatic_failure_does_not_release_pending_manual_switch(window):
     window._domain_event(Event("switch.failed", {"detail": "rejected"}))
     assert window._switching
     assert not window.dashboard.isEnabled()
+
+
+async def test_smart_policy_setting_saved_and_reloaded(window, migrated_db, monkeypatch):
+    from codex_account_manager.storage.repositories import SettingsRepository
+
+    pending = []
+    monkeypatch.setattr(window.runner, "submit", lambda coro, *_args: pending.append(coro))
+    index = window.settings.policy.findData("smart_quota")
+    assert index >= 0
+    window.settings._loaded({"switch_policy": "availability_failover"})
+    window.settings.policy.setCurrentIndex(index)
+    assert len(pending) == 1
+    await pending.pop()
+    saved = await SettingsRepository().all()
+    assert saved["switch_policy"] == "smart_quota"
+    window.settings._loaded(saved)
+    assert window.settings.policy.currentData() == "smart_quota"

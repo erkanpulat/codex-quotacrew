@@ -75,6 +75,8 @@ Version 0.4.0 upgrades the account database. Keep this version installed after u
 
 New installations select monitoring and automatic account switching. You can change preferences during setup or later in **Settings**. Switching restarts Codex Desktop; save your work first.
 
+For an optional reset-aware alternative, select **Smart switching — Quota and reset-aware**. When a switch is needed, it balances available quota with upcoming resets, favoring accounts with at least 15% remaining in both windows. If reset information is unreliable or no account meets that reserve, it falls back to available headroom; the reserve is a heuristic, not a guarantee that a task will finish.
+
 Enable **Keep running in the tray** to continue monitoring after closing the window. **Pause** stops automatic switching, work tracking and continuation; account information continues refreshing at the configured interval (60 seconds by default). Starting with Windows is a separate preference. A cancelled sign-in can be retried from the account's actions menu.
 
 GitHub release packages are not code-signed. `SHA256SUMS.txt` contains their file checksums.

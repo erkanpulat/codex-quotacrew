@@ -57,6 +57,7 @@ class SwitchPolicyKind(StrEnum):
     MANUAL = "manual"
     CONFIRM = "confirm"
     AVAILABILITY_FAILOVER = "availability_failover"
+    SMART_QUOTA = "smart_quota"
 
 
 class HandoffReason(StrEnum):

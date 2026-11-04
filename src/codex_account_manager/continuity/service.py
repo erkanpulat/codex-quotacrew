@@ -420,6 +420,7 @@ class ContinuityService:
         thread_id: str | None = None,
         transaction: AuthTransaction | None = None,
         before_desktop_stop: Callable[[], Awaitable[None]] | None = None,
+        selection_reason: str | None = None,
     ) -> SwitchResult:
         target = await self.profiles.get_by_alias(target_alias)
         if not target:
@@ -439,6 +440,7 @@ class ContinuityService:
             from_profile_id=from_profile.id if from_profile else None,
             to_profile_id=target.id,
             reason=reason,
+            detail=selection_reason,
         )
         await self.handoffs.save(handoff)
         await self.events.append(
@@ -565,6 +567,7 @@ class ContinuityService:
         *,
         transaction: AuthTransaction | None = None,
         reason: HandoffReason = HandoffReason.USAGE_LIMITED,
+        selection_reason: str | None = None,
     ) -> SwitchResult:
         """Commit the account handoff before starting any verified interrupted work."""
         if self.automation.tasks and reason == HandoffReason.MANUAL:
@@ -670,6 +673,7 @@ class ContinuityService:
                 reason=reason,
                 transaction=transaction,
                 before_desktop_stop=before_desktop_stop,
+                selection_reason=selection_reason,
             )
         except BaseException:
             await self.automation.discard_pending(pending)
