@@ -51,7 +51,7 @@ Changelog = "https://github.com/erkanpulat/codex-quotacrew/blob/main/CHANGELOG.m
 gui = ["PySide6==6.11.2"]
 store = [
     "winrt-Windows.ApplicationModel==4!10.0.28000.2705; sys_platform == 'win32'",
-    "winrt-Windows.Foundation==4!10.0.28000.2705; sys_platform == 'win32'",
+    "winrt-Windows.Foundation==4!10.0.28000.2957; sys_platform == 'win32'",
 ]
 dev = [
     "pytest>=8",
