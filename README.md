@@ -60,7 +60,7 @@ The plan badge can also show the subscription-period date recorded at sign-in wh
 
 **Python included · No Node.js required · Existing Codex history preserved**
 
-1. **Download and install.** Get QuotaCrew from [Microsoft Store](https://apps.microsoft.com/detail/9NM4VKLKS9PF), or install `QuotaCrew-Setup-0.4.0.exe` from the [latest GitHub release](https://github.com/erkanpulat/codex-quotacrew/releases/latest). For portable use, download `QuotaCrew-portable-0.4.0.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
+1. **Download and install.** Get QuotaCrew from [Microsoft Store](https://apps.microsoft.com/detail/9NM4VKLKS9PF), or install `QuotaCrew-Setup-0.4.1.exe` from the [latest GitHub release](https://github.com/erkanpulat/codex-quotacrew/releases/latest). For portable use, download `QuotaCrew-portable-0.4.1.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
 2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
 3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
 

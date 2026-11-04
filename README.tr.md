@@ -56,7 +56,7 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.0.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.0.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.1.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.1.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 
