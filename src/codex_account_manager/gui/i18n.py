@@ -337,6 +337,7 @@ TR = {
     "Owner unavailable; retrying later": "Sohbet sahibi kullanılamıyor; daha sonra yeniden doğrulanacak",
     "Remove observation": "Takip kaydını kaldır",
     "{count} running": "{count} iş çalışıyor",
+    "{running} running · {unknown} unverified": "{running} iş çalışıyor · {unknown} iş doğrulanamadı",
     "{count} saved observations could not be verified.": "{count} kayıtlı gözlem doğrulanamadı.",
     "{surface}: {state}": "{surface}: {state}",
     "Enter minutes: 120 = 2 hours, 180 = 3 hours. Range: 1–1440 minutes.": "Dakika olarak girin: 120 = 2 saat, 180 = 3 saat. Aralık: 1–1440 dakika.",

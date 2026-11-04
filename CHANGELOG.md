@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 (2026-11-05)
+
+- Add optional smart account switching that considers remaining capacity and upcoming quota resets. The Overview previews the selected policy’s next candidate.
+- Update the paired Windows Runtime dependencies used by Microsoft Store startup integration.
+
 ## 0.4.0 — 2026-10-29
 
 - Distinguish users sharing a workspace when binding profiles, displaying quotas and identifying the active account.

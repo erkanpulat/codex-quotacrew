@@ -390,6 +390,13 @@ def test_continuation_badges_and_tray_follow_loaded_settings(window):
     window._work_changed(3, 2)
     assert "3 running" in window.tray_work.text()
     assert "3 running" in window.work_badge.text()
+    assert "2 unverified" in window.work_badge.text()
+    assert window.tray_work.text() == window.work_badge.text()
+    window._work_changed(0, 3)
+    assert window.work_badge.text() == "0 running · 3 unverified"
+    assert window.tray_work.text() == window.work_badge.text()
+    window._work_changed(3, 0)
+    assert window.work_badge.text() == "3 running"
     window._monitoring_changed(False)
     assert "Paused" in window.ide_badge.text()
     assert window._running_work == 3

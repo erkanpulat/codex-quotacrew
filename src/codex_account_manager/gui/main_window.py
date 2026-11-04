@@ -445,6 +445,14 @@ class MainWindow(QMainWindow):
             badge.style().unpolish(badge)
             badge.style().polish(badge)
         self.work_badge.setText(tr("{count} running", count=self._running_work))
+        if self._unverified_work:
+            self.work_badge.setText(
+                tr(
+                    "{running} running · {unknown} unverified",
+                    running=self._running_work,
+                    unknown=self._unverified_work,
+                )
+            )
         self.work_badge.setToolTip(
             tr("{count} saved observations could not be verified.", count=self._unverified_work)
         )
@@ -479,7 +487,7 @@ class MainWindow(QMainWindow):
 
     def _update_tray_status(self) -> None:
         detail = self._power_message if self._power_active else self._monitor_message
-        work = tr("{count} running", count=self._running_work)
+        work = self.work_badge.text()
         self.tray.setToolTip(
             (tr("QuotaCrew") + "\n" + detail + "\n" + work + " · " + self.ide_badge.text())[:127]
         )
