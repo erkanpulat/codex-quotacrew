@@ -75,10 +75,10 @@ class SettingsView(BaseView):
 
         self.policy = ComboBox()
         for title, value in (
-            (tr("Manual — I choose"), "manual"),
+            (tr("Manual (I choose)"), "manual"),
             (tr("Ask before switching"), "confirm"),
             (tr("Automatic when usage is limited"), "availability_failover"),
-            (tr("Smart switching — Quota and reset-aware"), "smart_quota"),
+            (tr("Smart switching (quota and reset times)"), "smart_quota"),
         ):
             self.policy.addItem(title, value)
         self.policy.setCurrentIndex(self.policy.findData("availability_failover"))

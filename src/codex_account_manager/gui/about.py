@@ -79,7 +79,7 @@ class AboutView(BaseView):
             (
                 tr("What does it do?"),
                 tr(
-                    "Manage multiple Codex accounts on one device, monitor their usage quotas, and switch the account used by Codex Desktop. Browse local conversations by project and choose automatic, confirmation or manual switching."
+                    "Manage multiple Codex accounts on one device, monitor their usage quotas, and switch the account used by Codex Desktop. Browse local conversations by project and choose smart, automatic, confirmation or manual switching."
                 ),
             ),
             (
@@ -91,7 +91,7 @@ class AboutView(BaseView):
             (
                 tr("Does it work automatically?"),
                 tr(
-                    "Checks are on by default for new installations. Choose automatic, confirmation or manual switching in Settings; pause or resume checks from Overview. Checks run every 60 seconds by default; the interval is adjustable from 30 to 3600 seconds. Closing the window quits unless you explicitly enable running in the tray. The sidebar always shows monitoring status."
+                    "Checks are on by default for new installations. Choose smart, automatic, confirmation or manual switching in Settings; pause or resume checks from Overview. Checks run every 60 seconds by default; the interval is adjustable from 30 to 3600 seconds. Closing the window quits unless you explicitly enable running in the tray. The sidebar always shows monitoring status."
                 ),
             ),
             (

@@ -142,9 +142,9 @@ class SetupDialog(QDialog):
         self.policy = ComboBox()
         for title, value in (
             ("Automatic when usage is limited", "availability_failover"),
-            ("Smart switching — Quota and reset-aware", "smart_quota"),
+            ("Smart switching (quota and reset times)", "smart_quota"),
             ("Ask before switching", "confirm"),
-            ("Manual — I choose", "manual"),
+            ("Manual (I choose)", "manual"),
         ):
             self.policy.addItem(tr(title), value)
         setting_row(

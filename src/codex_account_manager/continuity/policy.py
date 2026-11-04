@@ -205,6 +205,16 @@ class SmartQuotaPolicy(SwitchPolicy):
     ) -> SwitchDecision:
         if not self._current_limited(current):
             return SwitchDecision(False, False, None, "Current profile still has capacity.")
+        return self._selection(current, candidates)
+
+    def _best_candidate(
+        self, current: ProfileHealth | None, candidates: list[ProfileHealth]
+    ) -> ProfileHealth | None:
+        return self._selection(current, candidates).target
+
+    def _selection(
+        self, current: ProfileHealth | None, candidates: list[ProfileHealth]
+    ) -> SwitchDecision:
         available = self._available_candidates(current, candidates)
         if not available:
             return SwitchDecision(

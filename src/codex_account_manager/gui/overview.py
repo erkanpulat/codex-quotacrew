@@ -233,7 +233,7 @@ class DashboardView(BaseView):
             return
         self.account_table.set_sort(self.sort_order.currentData())
         query = self.search.text().casefold().strip()
-        from codex_account_manager.continuity.policy import SwitchPolicy
+        from codex_account_manager.continuity.policy import SwitchPolicy, resolve_policy
 
         mode = self.account_filter.currentData()
         health = [
@@ -280,7 +280,7 @@ class DashboardView(BaseView):
         current = next((h for h in self._health if h.is_active), None)
         candidate = None
         if self._monitoring and self._switch_mode != "manual" and current is not None:
-            candidate = SwitchPolicy()._best_candidate(current, self._health)
+            candidate = resolve_policy(self._switch_mode)._best_candidate(current, self._health)
         self.account_table.set_profiles(
             ordered,
             email_visible=not self.email_toggle.isChecked(),
