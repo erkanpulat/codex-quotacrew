@@ -69,7 +69,7 @@ Continuation labels distinguish a queued request from one already sent. **Check 
 Plans require confirmation, apply only to the current application session and can be cancelled from the page or tray.
 
 - **Selected work:** wait for the selected conversation to finish, including continuation turns. If it has a goal, that goal must complete. Errors, pauses and requests for input are not completion.
-- **All limits:** require freshly verified exhausted five-hour quotas on every saved account, with no available account to switch to. Reset credits are not remaining five-hour capacity.
+- **All limits:** require fresh identity and quota checks confirming that every saved account is blocked by an exhausted five-hour or weekly quota. An unreadable account does not count as exhausted. Unused reset credits do not restore usable quota until applied.
 - **Timer:** choose 1–1440 minutes. The final two-minute warning is included in that duration; a one-minute timer warns immediately. This mode does not wait for work to finish.
 
 Work and limit modes also wait for other observed Codex work to stop before a two-minute countdown. Checks run every 60 seconds while waiting, every 15 seconds during countdown and immediately before shutdown. Missing evidence resets the countdown.

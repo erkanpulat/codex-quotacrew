@@ -29,3 +29,16 @@ def test_isolated_data_home_does_not_collide_with_daily_app(tmp_paths, monkeypat
         assert not second.acquire()
     finally:
         first.release()
+
+
+def test_activation_message_keeps_isolated_windows_separate(tmp_paths, monkeypatch):
+    import sys
+
+    if sys.platform != "win32":
+        return
+    monkeypatch.delenv("WIN_PD_OVERRIDE_LOCAL_APPDATA", raising=False)
+    daily = SingleInstance().activation_message()
+    monkeypatch.setenv("WIN_PD_OVERRIDE_LOCAL_APPDATA", str(tmp_paths.data_dir))
+    isolated = SingleInstance().activation_message()
+    assert daily and isolated and daily != isolated
+    assert isolated == SingleInstance().activation_message()

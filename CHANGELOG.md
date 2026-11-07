@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 (2026-11-07)
+
+- Allow quota-based shutdown when every saved account is verified limited by either its five-hour or weekly quota.
+- Make active account filters and visible account counts clear in Overview and My accounts.
+- Identify the existing profile when the same ChatGPT account is added again, with an action to show it.
+- Show the existing window when QuotaCrew is opened again, honor an explicit setup reset without removing accounts, and preserve the existing-shortcut status in background checks.
+- Keep a committed account switch successful when automatic continuation cannot start.
+- Explain when an account database requires a newer application version without resetting saved data.
+
 ## 0.4.1 (2026-11-05)
 
 - Add optional smart account switching that considers remaining capacity and upcoming quota resets. The Overview previews the selected policy’s next candidate.

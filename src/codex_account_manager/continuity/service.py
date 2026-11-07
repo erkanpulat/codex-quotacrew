@@ -713,16 +713,16 @@ class ContinuityService:
                 bus.publish("continuation.status", state="waiting_connection", stage="desktop")
         tickets = ready_desktop + tickets
         kept_pending_ids = {item.thread_id for item in deferred_desktop}
-        await self.automation.discard_pending(
-            [
-                t
-                for t in pending
-                if t.thread_id not in {item.thread_id for item in tickets}
-                and t.thread_id not in kept_pending_ids
-            ]
-        )
-        if tickets:
-            try:
+        try:
+            await self.automation.discard_pending(
+                [
+                    t
+                    for t in pending
+                    if t.thread_id not in {item.thread_id for item in tickets}
+                    and t.thread_id not in kept_pending_ids
+                ]
+            )
+            if tickets:
                 target = await self.profiles.get_by_alias(target_alias)
                 if not target or not target.identity.owner_key:
                     raise AppServerError("The target account identity could not be verified.")
@@ -741,13 +741,13 @@ class ContinuityService:
                         for ticket in tickets
                     ]
                 )
-            except Exception:
-                log.warning("Account switch committed; automatic continuation could not start.")
-                bus.publish("continuation.status", state="needs_user", stage="connection")
-        elif not desktop_threads and await self.automation.enabled():
-            bus.publish(
-                "continuation.status", state="needs_user" if preparation_failed else "skipped"
-            )
+            elif not desktop_threads and await self.automation.enabled():
+                bus.publish(
+                    "continuation.status", state="needs_user" if preparation_failed else "skipped"
+                )
+        except Exception:
+            log.warning("Account switch committed; automatic continuation could not start.")
+            bus.publish("continuation.status", state="needs_user", stage="connection")
         return result
 
     async def resume_conversation(self, thread_id: str) -> None:

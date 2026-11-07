@@ -17,6 +17,7 @@ def main() -> int:
         return 0
     lock = SingleInstance()
     if not lock.acquire():
+        lock.request_activation()
         return 0
     try:
         from codex_account_manager.gui.app import run_gui

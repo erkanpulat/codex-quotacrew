@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from codex_account_manager.core.errors import AccountRecoveryRequired
+from codex_account_manager.core.errors import AccountRecoveryRequired, DatabaseVersionError
 from codex_account_manager.core.files import restrict_access
 from codex_account_manager.core.logging import get_logger
 from codex_account_manager.core.paths import paths
@@ -369,7 +369,9 @@ async def migrate() -> int:
 
         current = await _current_version(db)
         if current > TARGET_VERSION:
-            raise RuntimeError("Database was created by a newer version; upgrade QuotaCrew.")
+            raise DatabaseVersionError(
+                "Database was created by a newer version; upgrade QuotaCrew."
+            )
 
         cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         table_names = {row[0] for row in await cursor.fetchall()}

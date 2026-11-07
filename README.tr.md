@@ -56,7 +56,7 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.1.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.1.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.2.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.2.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 
@@ -154,7 +154,7 @@ Yerel konuşmalarınızı proje, kaynak, başlık veya klasöre göre arayın; i
 
 Uzun bir işi Codex’e bıraktığınızda bilgisayarı kapatmak için başında beklemek zorunda kalmayın. Hesap geçişi ve sohbet devamını tek başına kullanabilir, ihtiyaç duyduğunuzda ayrıca kapatma planı açabilirsiniz.
 
-**Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların doğrulanmış 5 saatlik kotaları dolup geçilebilecek hesap kalmadığında veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
+**Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların 5 saatlik veya haftalık kotası dolduğu doğrulanıp kullanılabilir hesap kalmadığında veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
 
 ![Üç koşul, süre seçimi ve plan özetiyle otomatik kapatma](docs/images/power-tr.png)
 

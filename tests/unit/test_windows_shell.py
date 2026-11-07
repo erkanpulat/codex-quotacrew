@@ -9,6 +9,17 @@ from codex_account_manager.core.windows_shell import APP_USER_MODEL_ID, create_s
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows shell integration")
 
 
+@pytest.fixture(autouse=True)
+def shell_apartment():
+    import pythoncom
+
+    pythoncom.CoInitialize()
+    try:
+        yield
+    finally:
+        pythoncom.CoUninitialize()
+
+
 def test_shortcuts_match_application_identity_and_use_windowed_launcher(tmp_path):
     import pythoncom
     from win32com.propsys import propsys, pscon
@@ -164,3 +175,23 @@ def test_frozen_standalone_shortcut_keeps_executable_icon(tmp_path, monkeypatch)
     shortcut.QueryInterface(pythoncom.IID_IPersistFile).Load(str(path))
     assert shortcut.GetPath(0)[0] == sys.executable
     assert shortcut.GetIconLocation() == (sys.executable, 0)
+
+
+def test_frozen_shortcut_uses_redirected_windows_desktop(tmp_path, monkeypatch):
+    from win32com.shell import shell, shellcon
+
+    from codex_account_manager.core import windows_shell
+
+    redirected = tmp_path / "OneDrive" / "Masaüstü"
+    folders = []
+
+    def folder_path(_owner, folder, _token, _flags):
+        folders.append(folder)
+        return str(redirected)
+
+    monkeypatch.setattr(shell, "SHGetFolderPath", folder_path)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(windows_shell.package, "current_package", lambda: None)
+    shortcut = windows_shell.create_desktop_shortcut()
+    assert shortcut == redirected / "QuotaCrew.lnk" and shortcut.is_file()
+    assert folders == [shellcon.CSIDL_DESKTOPDIRECTORY]

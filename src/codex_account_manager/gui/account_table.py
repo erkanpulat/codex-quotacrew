@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -348,6 +348,40 @@ class AccountControls(QWidget):
         layout.setSpacing(16)
         layout.addWidget(self.hero)
         layout.addWidget(self.toolbar_host)
+        self.filter_status = QWidget()
+        status_layout = QHBoxLayout(self.filter_status)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        self.filter_summary = label("", "Accent")
+        self.filter_summary.setWordWrap(True)
+        status_layout.addWidget(self.filter_summary, 1)
+        self.clear_button = QPushButton(tr("Clear filters"))
+        self.clear_button.setObjectName("Ghost")
+        self.clear_button.clicked.connect(self.clear_filters)
+        status_layout.addWidget(self.clear_button)
+        layout.addWidget(self.filter_status)
+        self.filter_status.hide()
+
+    def set_filter_result(self, visible: int, total: int) -> None:
+        filtered = self.account_filter.currentData() != "all"
+        if self.account_filter.property("filtered") != filtered:
+            self.account_filter.setProperty("filtered", filtered)
+            self.account_filter.style().unpolish(self.account_filter)
+            self.account_filter.style().polish(self.account_filter)
+        parts = []
+        if filtered:
+            parts.append(tr("Filter: {filter}", filter=self.account_filter.currentText()))
+        if self.search.text().strip():
+            parts.append(tr("Search active"))
+        self.filter_status.setVisible(bool(parts))
+        if parts:
+            parts.append(tr("Showing {visible} of {total} accounts", visible=visible, total=total))
+        self.filter_summary.setText(" · ".join(parts))
+
+    def clear_filters(self) -> None:
+        with QSignalBlocker(self.search), QSignalBlocker(self.account_filter):
+            self.search.clear()
+            self.account_filter.setCurrentIndex(self.account_filter.findData("all"))
+        self.changed.emit()
 
     def _privacy_changed(self, hidden: bool) -> None:
         self.email_toggle.setAccessibleName(

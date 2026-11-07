@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.continuity.policy import SwitchPolicy
-from codex_account_manager.core.errors import OperationBusyError
+from codex_account_manager.core.errors import AccountAlreadyBoundError, OperationBusyError
 from codex_account_manager.domain.models import Profile, ProfileHealth
 from codex_account_manager.gui.account_table import (
     AccountControls,
@@ -48,6 +48,7 @@ class AccountsView(BaseView):
         self._menu_buttons: list[QToolButton] = []
         self._profiles: list[Profile | ProfileHealth] = []
         self._sort_mode = "name"
+        self._reveal_profile_id: str | None = None
 
         add = QPushButton(tr(" Add profile"))
         add.setObjectName("Primary")
@@ -133,6 +134,17 @@ class AccountsView(BaseView):
         self.table.setVisible(bool(profiles))
         self.controls.set_summary([display_health(profile) for profile in profiles])
         self._filter()
+        if self._reveal_profile_id:
+            for profile in profiles:
+                profile_id = (
+                    profile.profile_id if isinstance(profile, ProfileHealth) else profile.id
+                )
+                if profile_id == self._reveal_profile_id and profile.alias in self.table.rows:
+                    row = self.table.rows[profile.alias]
+                    self.table.scroll_area.ensureWidgetVisible(row)
+                    row._switch_btn.setFocus(Qt.FocusReason.OtherFocusReason)
+                    self._reveal_profile_id = None
+                    break
 
     def _sort_column(self, modes: tuple[str, str]) -> None:
         self._sort_mode = modes[1] if self._sort_mode == modes[0] else modes[0]
@@ -180,6 +192,7 @@ class AccountsView(BaseView):
                 )
             )
         ]
+        self.controls.set_filter_result(len(profiles), len(self._profiles))
         ordered = sorted(
             profiles,
             key=lambda profile: account_sort_key(profile, self._sort_mode, time.time()),
@@ -267,6 +280,9 @@ class AccountsView(BaseView):
         self.refresh()
 
     def _login_failed(self, error: Exception) -> None:
+        if isinstance(error, AccountAlreadyBoundError):
+            self._already_bound(error)
+            return
         self._login_busy = False
         self.operation_status.setText(
             tr("Sign-in could not be completed. Open the account menu and try again.")
@@ -283,8 +299,35 @@ class AccountsView(BaseView):
             self.runner.submit(
                 self.accounts.bind_current_account(alias),
                 lambda _: self.refresh(),
-                lambda e: QMessageBox.warning(self, tr("Bind failed"), str(e)),
+                self._bind_failed,
             )
+
+    def _bind_failed(self, error: Exception) -> None:
+        if isinstance(error, AccountAlreadyBoundError):
+            self._already_bound(error)
+        else:
+            QMessageBox.warning(self, tr("Bind failed"), str(error))
+
+    def _already_bound(self, error: AccountAlreadyBoundError) -> None:
+        self._login_busy = False
+        self._set_actions_enabled(True)
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setWindowTitle(tr("Account already added"))
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(
+            tr(
+                "This ChatGPT account is already linked to '{alias}'. You do not need to add it again.",
+                alias=error.alias,
+            )
+        )
+        show = dialog.addButton(tr("Show existing account"), QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton(tr("Close"), QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() == show:
+            self._reveal_profile_id = error.profile_id
+            self.controls.clear_filters()
+        self.refresh()
 
     def _rename(self, alias: str) -> None:
         if self._login_busy:

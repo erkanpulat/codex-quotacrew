@@ -230,6 +230,24 @@ async def test_same_user_can_bind_two_workspaces(migrated_db):
     assert len({profile.identity.owner_key for profile in await repository.list()}) == 2
 
 
+async def test_duplicate_binding_names_existing_profile_and_preserves_both(migrated_db):
+    from codex_account_manager.core.errors import AccountAlreadyBoundError
+
+    service = AccountService(
+        app_server_factory=lambda _home: FakeAppServer(account_id="W1", identity=owner())
+    )
+    existing = await service.create_profile("Work")
+    await service.bind_current_account(existing.alias)
+    duplicate = await service.create_profile("Second name")
+    with pytest.raises(AccountAlreadyBoundError) as error:
+        await service.bind_current_account(duplicate.alias)
+    assert error.value.profile_id == existing.id
+    assert error.value.alias == existing.alias
+    saved = await service.profiles.get_by_alias(existing.alias)
+    assert saved.identity.owner_key == owner().owner_key
+    assert (await service.profiles.get_by_alias(duplicate.alias)).bound_account_id is None
+
+
 async def test_legacy_binding_does_not_fabricate_a_user(migrated_db):
     repository = ProfileRepository()
     profile = Profile(alias="legacy", codex_home="home")

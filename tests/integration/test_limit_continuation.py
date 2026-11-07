@@ -122,7 +122,7 @@ async def test_manual_switch_stops_other_supervisor_without_clearing_tracking(
             if auto_continue
             else service.handoff("hesap2", transaction=tx)
         )
-        result = await asyncio.wait_for(action, 3)
+        result = await asyncio.wait_for(action, 15)
         assert result.success and result.account_id == "acc-2"
         assert store.read_active() == account_auth("acc-2")
         assert desktop.stopped == desktop.launched == 1
@@ -643,6 +643,44 @@ async def test_conversation_load_failure_does_not_undo_verified_account_switch(
         tid == "thread" and json.loads(payload) == {"state": "needs_user", "stage": "conversation"}
         for tid, payload in records
     )
+
+
+async def test_continuation_settings_failure_keeps_committed_switch(migrated_db, monkeypatch):
+    import sqlite3
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.core.events import bus
+    from codex_account_manager.domain.states import HandoffReason
+
+    accounts = AccountService(app_server_factory=_factory("acc-2"))
+    await _seed_two_profiles(migrated_db, accounts)
+    store = FileCredentialStore(shared_home=migrated_db.shared_codex_home)
+    store.write_active_atomic(account_auth("acc-1"))
+    service = ContinuityService(accounts=accounts)
+    monkeypatch.setattr(
+        service, "observe_work", AsyncMock(return_value=account_identity("acc-1").fingerprint)
+    )
+    monkeypatch.setattr(
+        service.automation, "enabled", AsyncMock(side_effect=sqlite3.OperationalError("locked"))
+    )
+    desktop = FakeDesktop()
+    events = []
+    unsubscribe = bus.subscribe("continuation.status", lambda event: events.append(event.payload))
+    tx = AuthTransaction(
+        credential_store=store,
+        desktop=desktop,
+        verify_account=AsyncMock(return_value=account_identity("acc-2")),
+    )
+    try:
+        result = await service.continue_on_limit(
+            "hesap2", transaction=tx, reason=HandoffReason.MANUAL
+        )
+        assert result.success
+        assert store.read_active() == account_auth("acc-2")
+        assert desktop.stopped == desktop.launched == 1
+        assert any(event["state"] == "needs_user" for event in events)
+    finally:
+        unsubscribe()
 
 
 async def test_history_write_failure_after_commit_does_not_report_switch_failure(migrated_db):

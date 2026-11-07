@@ -18,10 +18,16 @@ from PySide6.QtWidgets import (
 )
 
 from codex_account_manager.core.privacy import policy_path
+from codex_account_manager.core.single_instance import SingleInstance
 from codex_account_manager.gui.design import app_icon
 from codex_account_manager.gui.i18n import tr
 from codex_account_manager.gui.view_base import setting_row
-from codex_account_manager.gui.widgets import ComboBox, ToggleSwitch, label
+from codex_account_manager.gui.widgets import (
+    ComboBox,
+    ToggleSwitch,
+    handle_window_activation,
+    label,
+)
 from codex_account_manager.platform import package
 from codex_account_manager.storage.repositories import ProfileRepository, SettingsRepository
 
@@ -29,6 +35,8 @@ from codex_account_manager.storage.repositories import ProfileRepository, Settin
 async def needs_setup() -> bool:
     settings = SettingsRepository()
     values = await settings.all()
+    if values.get("setup_completed") == "false":
+        return True
     if package.is_packaged() and values.get("store_setup_completed") != "true":
         return True
     if values.get("setup_completed") == "true":
@@ -40,8 +48,14 @@ async def needs_setup() -> bool:
 
 
 class SetupDialog(QDialog):
+    def nativeEvent(self, event_type, message):
+        if handle_window_activation(self, event_type, message):
+            return True, 0
+        return super().nativeEvent(event_type, message)
+
     def __init__(self, runner):
         super().__init__()
+        self._activation_message = SingleInstance().activation_message()
         self.setObjectName("SetupDialog")
         self._packaged = package.is_packaged()
         self.setWindowTitle(tr("Welcome to QuotaCrew"))

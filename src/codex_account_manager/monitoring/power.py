@@ -54,7 +54,7 @@ def all_accounts_limited(health: list[ProfileHealth], now: datetime) -> bool:
         and not h.stale
         and not h.reauth_required
         and any(
-            minutes == 300 and used is not None and math.isfinite(used) and used >= 100
+            minutes in {300, 10080} and used is not None and math.isfinite(used) and used >= 100
             for minutes, used in (
                 (h.primary_window_minutes, h.primary_used_percent),
                 (h.secondary_window_minutes, h.secondary_used_percent),
@@ -452,12 +452,12 @@ class PowerChecks:
                     if available:
                         return PowerEvidence(
                             False,
-                            "{count} accounts still have capacity. Shutdown requires exhausted five-hour quotas and no running work.",
+                            "{count} accounts still have usable quota. Shutdown is waiting.",
                             values={"count": available},
                         )
                     return PowerEvidence(
                         False,
-                        "Not all five-hour quotas are confirmed exhausted. Check Accounts for missing or expired sign-ins.",
+                        "Not all accounts are confirmed quota-limited. Check Accounts for unverified or outdated information.",
                     )
                 identity = "|".join(
                     sorted(f"{h.profile_id}:{h.identity.fingerprint}" for h in health if h.identity)

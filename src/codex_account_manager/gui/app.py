@@ -6,7 +6,11 @@ import asyncio
 import os
 import sys
 
-from codex_account_manager.core.errors import AccountRecoveryRequired, TransactionError
+from codex_account_manager.core.errors import (
+    AccountRecoveryRequired,
+    DatabaseVersionError,
+    TransactionError,
+)
 from codex_account_manager.core.logging import configure_logging, get_logger
 from codex_account_manager.core.protection import CredentialProtectionError
 from codex_account_manager.core.windows_shell import set_application_identity
@@ -20,7 +24,7 @@ def run_gui() -> int:
         configure_logging()
         log.info("QuotaCrew started (pid=%d).", os.getpid())
         asyncio.run(initialize_database())
-    except AccountRecoveryRequired:
+    except (AccountRecoveryRequired, DatabaseVersionError) as exc:
         from PySide6.QtCore import QLocale
         from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -28,13 +32,18 @@ def run_gui() -> int:
 
         app = QApplication.instance() or QApplication(sys.argv)
         set_language("tr" if QLocale.system().name().startswith("tr") else "en")
-        QMessageBox.critical(
-            None,
-            tr("Account recovery required"),
-            tr(
-                "Saved sign-in files exist, but the account list is missing. Startup was stopped to protect your data. Do not reset or delete the data folder. Restore the account database from a verified backup."
-            ),
+        title, message = (
+            (
+                "Newer QuotaCrew version required",
+                "This account database was updated by a newer QuotaCrew version. Install that version or a newer one. Do not delete or reset your account data.",
+            )
+            if isinstance(exc, DatabaseVersionError)
+            else (
+                "Account recovery required",
+                "Saved sign-in files exist, but the account list is missing. Startup was stopped to protect your data. Do not reset or delete the data folder. Restore the account database from a verified backup.",
+            )
         )
+        QMessageBox.critical(None, tr(title), tr(message))
         return 1
     except OSError:
         from PySide6.QtWidgets import QApplication, QMessageBox

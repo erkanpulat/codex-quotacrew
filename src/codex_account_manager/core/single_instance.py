@@ -45,6 +45,31 @@ class SingleInstance:
             return self._acquire_windows()
         return self._acquire_posix()
 
+    def activation_message(self) -> int:
+        if sys.platform != "win32":
+            return 0
+        import ctypes
+        from ctypes import wintypes
+
+        register = ctypes.WinDLL("user32", use_last_error=True).RegisterWindowMessageW
+        register.argtypes = [wintypes.LPCWSTR]
+        register.restype = wintypes.UINT
+        return register(self.name + ".ShowWindow")
+
+    def request_activation(self) -> bool:
+        if sys.platform != "win32":
+            return False
+        message = self.activation_message()
+        if not message:
+            return False
+        import ctypes
+        from ctypes import wintypes
+
+        post = ctypes.WinDLL("user32", use_last_error=True).PostMessageW
+        post.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        post.restype = wintypes.BOOL
+        return bool(post(0xFFFF, message, 0, 0))  # HWND_BROADCAST reaches hidden top-level windows.
+
     def _acquire_windows(self) -> bool:
         if sys.platform != "win32":
             return False
