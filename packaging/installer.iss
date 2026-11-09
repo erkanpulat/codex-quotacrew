@@ -1,5 +1,5 @@
 #define AppName "QuotaCrew"
-#define AppVersion "0.4.1"
+#define AppVersion "0.4.2"
 #define AppExe "QuotaCrew.exe"
 #define AppPublisher "QuotaCrew contributors"
 #ifndef BundleRoot
@@ -11,6 +11,7 @@ SetupIconFile=assets\app.ico
 AppId={{7C2E5F3A-1D2B-4E6A-9C11-590DBC049B83}}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={userpf}\QuotaCrew
 DefaultGroupName={#AppName}

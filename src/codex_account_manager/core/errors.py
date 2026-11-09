@@ -77,8 +77,23 @@ class AccountRecoveryRequired(AccountManagerError):
     """Stored sign-ins exist but their account catalogue is missing."""
 
 
+class DatabaseVersionError(AccountManagerError):
+    """The account database requires a newer application version."""
+
+
 class ProfileNotFoundError(AccountManagerError):
     """No profile matches the requested alias or id."""
+
+
+class AccountAlreadyBoundError(AccountManagerError, ValueError):
+    def __init__(self, profile_id: str, alias: str):
+        self.profile_id = profile_id
+        self.alias = alias
+        super().__init__(f"This account is already bound to profile '{alias}'.")
+
+
+class DesktopShortcutExistsError(AccountManagerError, FileExistsError):
+    """Keep the existing-file result recognizable across background delivery."""
 
 
 class AccountMismatchError(AccountManagerError):

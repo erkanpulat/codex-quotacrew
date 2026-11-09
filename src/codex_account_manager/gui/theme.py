@@ -197,6 +197,7 @@ QComboBox {{ background: {p.surface_alt}; border: 1px solid {p.border}; border-r
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox::down-arrow {{ image: none; }}
 QComboBox:hover {{ border-color: {p.primary}; }}
+QComboBox[filtered="true"] {{ border-color: {p.primary}; }}
 QComboBox QAbstractItemView {{
     background: {p.surface}; border: 1px solid {p.border};
     selection-background-color: {p.surface_alt}; outline: 0;

@@ -4,17 +4,22 @@
 
 # QuotaCrew for Codex
 
-<img src="docs/images/hero-tr.svg" width="1000" alt="Hesap değişsin. İş devam etsin. Hesap yönetimi, sohbet devamı ve isteğe bağlı kapatma." />
+<img src="docs/images/hero-tr.svg" width="1000" alt="Codex hesapların otomatik değişsin, sohbetlerin kaldığı yerden otomatik devam etsin. İşin bitince bilgisayarın kapansın." />
 
-**Hesapların otomatik değişsin, işlerin kaldığı yerden devam etsin. İşin bitince bilgisayarın kapansın.**
+**Codex hesapların otomatik değişsin, sohbetlerin kaldığı yerden otomatik devam etsin. İşin bitince bilgisayarın kapansın.**
 
 Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneticisi. Hesaplarını, kotalarını ve işlerini tek pencereden yönet; otomatik devamı ve isteğe bağlı kapatmayı ihtiyacına göre aç.
 
-<p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><img src="docs/images/navigation/store-live-tr.svg" width="720" height="112" alt="Microsoft Store'da yayında" /></a></p>
+<p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/tr%20dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://get.microsoft.com/images/tr%20light.svg" />
+  <img src="https://get.microsoft.com/images/tr%20dark.svg" width="520" alt="Microsoft Store’dan indirin" />
+</picture>
+</a></p>
 
 <div>
-<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><img src="docs/images/navigation/store-tr.svg" width="226" height="44" alt="QuotaCrew for Codex'i Microsoft Store'dan edinin" /></a>
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="GitHub’dan indir" /></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="226" height="44" alt="GitHub’dan indirin" /></a>
 </div>
 
 [Nasıl çalışır?](#devam-akışı) · [Kurulum](#kurulum) · [English](README.md)
@@ -56,7 +61,7 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.1.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.1.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.2.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.2.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 
@@ -154,7 +159,7 @@ Yerel konuşmalarınızı proje, kaynak, başlık veya klasöre göre arayın; i
 
 Uzun bir işi Codex’e bıraktığınızda bilgisayarı kapatmak için başında beklemek zorunda kalmayın. Hesap geçişi ve sohbet devamını tek başına kullanabilir, ihtiyaç duyduğunuzda ayrıca kapatma planı açabilirsiniz.
 
-**Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların doğrulanmış 5 saatlik kotaları dolup geçilebilecek hesap kalmadığında veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
+**Otomatik Kapatma** için üç seçenek vardır: seçtiğiniz iş tamamlandığında, tüm kayıtlı hesapların 5 saatlik veya haftalık kotası dolduğu doğrulanıp kullanılabilir hesap kalmadığında veya belirlediğiniz süre sonunda. İş ve limit koşulları doğrulanıp başka bir Codex işinin çalışmadığı görüldüğünde **2 dakikalık iptal edilebilir geri sayım** başlar. Süreli modda **1–1440 dakika** seçebilirsiniz (120 dakika = iki saat); son uyarı bu süreye dahildir ve işlerin bitmesi beklenmez. Planlar onayınızla açılır, yalnızca o oturumda geçerlidir ve açık uygulamaları zorla kapatmaz. [Kapatma koşulları](docs/continuity.md#optional-windows-shutdown).
 
 ![Üç koşul, süre seçimi ve plan özetiyle otomatik kapatma](docs/images/power-tr.png)
 
@@ -201,8 +206,12 @@ QuotaCrew telemetri toplamaz veya giriş bilgilerinizi kendi sunucusuna gönderm
 Windows paketini indirin, hesaplarınızı ekleyin ve hangi adımların otomatik olacağını seçin.
 
 <div>
-<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><img src="docs/images/navigation/store-tr.svg" width="226" height="44" alt="QuotaCrew for Codex'i Microsoft Store'dan edinin" /></a>
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="190" height="44" alt="GitHub’dan indir" /></a>
+<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/tr%20dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://get.microsoft.com/images/tr%20light.svg" />
+  <img src="https://get.microsoft.com/images/tr%20dark.svg" height="44" alt="Microsoft Store’dan indirin" />
+</picture></a>
+<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="226" height="44" alt="GitHub’dan indirin" /></a>
 </div>
 
 ---

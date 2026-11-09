@@ -8,6 +8,7 @@ from datetime import datetime
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -30,6 +31,20 @@ from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.domain.states import QuotaState
 from codex_account_manager.gui.design import DARK, Palette, make_icon
 from codex_account_manager.gui.i18n import language, tr
+
+
+def handle_window_activation(window: QWidget, event_type, message) -> bool:
+    activation = getattr(window, "_activation_message", 0)
+    if activation and event_type == b"windows_generic_MSG":
+        from ctypes import wintypes
+
+        if wintypes.MSG.from_address(int(message)).message == activation:
+            target = QApplication.activeModalWidget() or window
+            target.showNormal()
+            target.raise_()
+            target.activateWindow()
+            return True
+    return False
 
 
 class ElidedLabel(QLabel):

@@ -885,6 +885,171 @@ def test_login_error_is_translated_and_allows_retry(window, monkeypatch):
         set_language("en")
 
 
+@pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.parametrize("page", ["dashboard", "accounts_view"])
+def test_account_filters_show_visible_total_and_clear_without_changing_sort(app, page, language):
+    from codex_account_manager.gui.i18n import set_language, tr
+
+    set_language(language)
+    window = MainWindow(PreviewRunner())
+    try:
+        view = getattr(window, page)
+        health = sample_profiles()
+        view._render(health)
+        controls = view.controls
+        controls.sort_order.setCurrentIndex(controls.sort_order.findData("weekly_most"))
+        controls.email_toggle.setChecked(True)
+        controls.account_filter.setCurrentIndex(controls.account_filter.findData("attention"))
+        assert not controls.filter_status.isHidden()
+        assert tr("Needs attention") in controls.filter_summary.text()
+        assert (
+            tr("Showing {visible} of {total} accounts", visible=1, total=4)
+            in controls.filter_summary.text()
+        )
+        assert controls.account_filter.property("filtered") is True
+        controls.search.setText("no matching account")
+        assert (
+            tr("Showing {visible} of {total} accounts", visible=0, total=4)
+            in controls.filter_summary.text()
+        )
+        controls.clear_button.click()
+        assert controls.account_filter.currentData() == "all" and not controls.search.text()
+        assert controls.filter_status.isHidden()
+        assert controls.account_filter.property("filtered") is False
+        assert controls.sort_order.currentData() == "weekly_most"
+        assert controls.email_toggle.isChecked()
+        table = view.account_table if page == "dashboard" else view.table
+        assert len(table.rows) == 4
+    finally:
+        window.dispose()
+        window.close()
+        window.deleteLater()
+        set_language("en")
+
+
+@pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.parametrize("operation", ["login", "bind"])
+def test_duplicate_account_dialog_can_reveal_filtered_existing_profile(
+    window, monkeypatch, language, operation
+):
+    from PySide6.QtWidgets import QMessageBox
+
+    from codex_account_manager.core.errors import AccountAlreadyBoundError
+    from codex_account_manager.gui.i18n import set_language, tr
+
+    set_language(language)
+    try:
+        view = window.accounts_view
+        health = sample_profiles()
+        view._render(health)
+        view.status_filter.setCurrentIndex(view.status_filter.findData("attention"))
+        view.search.setText("not here")
+        view._login_busy = True
+        messages = []
+
+        def execute(dialog):
+            messages.append(dialog.text())
+            assert tr("Close") in [button.text() for button in dialog.buttons()]
+
+        monkeypatch.setattr(QMessageBox, "exec", execute)
+        monkeypatch.setattr(
+            QMessageBox,
+            "clickedButton",
+            lambda dialog: next(
+                button
+                for button in dialog.buttons()
+                if button.text() == tr("Show existing account")
+            ),
+        )
+        monkeypatch.setattr(view, "refresh", lambda: view._render(health))
+        error = AccountAlreadyBoundError(health[0].profile_id, health[0].alias)
+        (view._login_failed if operation == "login" else view._bind_failed)(error)
+        assert health[0].alias in messages[0]
+        assert view.status_filter.currentData() == "all" and not view.search.text()
+        assert health[0].alias in view.table.rows
+        assert not view._login_busy and view.add_button.isEnabled()
+    finally:
+        set_language("en")
+
+
+@pytest.mark.parametrize("outcome", ["created", "existing", "denied"])
+def test_shortcut_feedback_survives_background_delivery(app, tmp_path, monkeypatch, outcome):
+    from codex_account_manager.core.errors import DesktopShortcutExistsError
+    from codex_account_manager.gui import shortcuts
+    from codex_account_manager.gui.i18n import tr
+
+    calls = []
+
+    def create():
+        calls.append(threading.get_ident())
+        if outcome == "existing":
+            raise DesktopShortcutExistsError("A QuotaCrew desktop shortcut already exists.")
+        if outcome == "denied":
+            raise PermissionError("Synthetic access denial")
+        return tmp_path / "QuotaCrew.lnk"
+
+    monkeypatch.setattr(shortcuts, "create_desktop_shortcut", create)
+    runner = AsyncRunner()
+    panel = shortcuts.ShortcutPanel(runner)
+    try:
+        panel.button.setEnabled(True)
+        panel.button.click()
+        assert panel.note.text() == tr("Creating desktop shortcut…")
+        deadline = time.monotonic() + 5
+        while panel.note.text() == tr("Creating desktop shortcut…") and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        expected = {
+            "created": "Desktop shortcut created. You can also open QuotaCrew from Start.",
+            "existing": "A QuotaCrew desktop shortcut already exists.",
+            "denied": "The desktop shortcut could not be created. You can still open QuotaCrew from Start and retry here.",
+        }
+        assert panel.note.text() == tr(expected[outcome])
+        assert panel.button.isEnabled() is (outcome == "denied")
+        assert len(calls) == 1 and calls[0] != threading.get_ident()
+    finally:
+        runner.shutdown()
+        panel.deleteLater()
+
+
+def test_second_launch_requests_existing_window_without_starting_gui(monkeypatch):
+    from unittest.mock import Mock
+
+    from codex_account_manager.core import windows_shell
+    from codex_account_manager.gui import tray_main
+
+    lock = Mock()
+    lock.acquire.return_value = False
+    monkeypatch.setattr(tray_main, "SingleInstance", lambda: lock)
+    monkeypatch.setattr(windows_shell, "delegate_gui_launch", lambda: False)
+    assert tray_main.main() == 0
+    lock.request_activation.assert_called_once_with()
+    lock.release.assert_not_called()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows activation message")
+@pytest.mark.parametrize("surface", ["main", "setup"])
+def test_activation_message_restores_hidden_window(window, surface):
+    import ctypes
+    from ctypes import wintypes
+
+    from codex_account_manager.gui.onboarding import SetupDialog
+
+    target = window if surface == "main" else SetupDialog(PreviewRunner())
+    try:
+        target.showMinimized()
+        target.hide()
+        message = wintypes.MSG()
+        message.message = target._activation_message
+        assert message.message != 0
+        assert target.nativeEvent(b"windows_generic_MSG", ctypes.addressof(message)) == (True, 0)
+        assert target.isVisible() and not target.isMinimized()
+    finally:
+        if target is not window:
+            target.close()
+            target.deleteLater()
+
+
 def test_automatic_continuation_setting_and_status_are_visible(window):
     from codex_account_manager.core.events import Event
     from codex_account_manager.gui.i18n import set_language
@@ -1162,19 +1327,20 @@ def test_tracking_selection_follows_identity_after_refresh(window):
     assert not view.tracked_open.isEnabled()
 
 
-def test_missing_account_catalogue_shows_recovery_dialog_before_starting(app, monkeypatch):
+@pytest.mark.parametrize("error_name", ["AccountRecoveryRequired", "DatabaseVersionError"])
+def test_database_startup_error_shows_recovery_dialog(app, monkeypatch, error_name):
     from unittest.mock import AsyncMock
 
     from PySide6.QtWidgets import QMessageBox
 
-    from codex_account_manager.core.errors import AccountRecoveryRequired
+    from codex_account_manager.core import errors
     from codex_account_manager.gui import app as entry
 
     messages = []
     monkeypatch.setattr(
         entry,
         "initialize_database",
-        AsyncMock(side_effect=AccountRecoveryRequired("missing catalogue")),
+        AsyncMock(side_effect=getattr(errors, error_name)("database unavailable")),
     )
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: messages.append(args))
     assert entry.run_gui() == 1
@@ -1407,7 +1573,8 @@ def test_new_work_or_capacity_resets_applicable_countdown(window, mode, change):
     assert widget.plan.deadline == (None if should_reset else deadline)
 
 
-def test_confirmed_exhausted_accounts_do_not_restart_countdown(window):
+@pytest.mark.parametrize("exhausted_window", [300, 10080])
+def test_confirmed_exhausted_accounts_do_not_restart_countdown(window, exhausted_window):
     from dataclasses import replace
     from datetime import UTC, datetime
 
@@ -1424,7 +1591,9 @@ def test_confirmed_exhausted_accounts_do_not_restart_countdown(window):
             stale=False,
             reauth_required=False,
             primary_window_minutes=300,
-            primary_used_percent=100,
+            primary_used_percent=100 if exhausted_window == 300 else 25,
+            secondary_window_minutes=10080,
+            secondary_used_percent=100 if exhausted_window == 10080 else 25,
             ordinary_usage_allowed=False,
             quota_state=QuotaState.LIMITED_NO_RESET,
             last_checked_at=datetime.now(UTC),

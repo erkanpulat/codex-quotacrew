@@ -29,6 +29,7 @@ from codex_account_manager.core.child_process import (
     stop_owned_process,
 )
 from codex_account_manager.core.errors import (
+    AccountAlreadyBoundError,
     AccountMismatchError,
     AppServerError,
     OperationBusyError,
@@ -207,6 +208,9 @@ class AccountService:
                 profile.id, snapshot.account_id, user_id=identity.user_id
             )
         except sqlite3.IntegrityError as exc:
+            for existing in await self.profiles.list():
+                if existing.id != profile.id and existing.identity.matches(identity):
+                    raise AccountAlreadyBoundError(existing.id, existing.alias) from exc
             raise ValueError("This account is already bound to another profile.") from exc
         return snapshot.account_id
 

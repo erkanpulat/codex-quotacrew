@@ -71,7 +71,7 @@ class PowerControls(QFrame):
                 ("When work finishes", "Your selected conversation completes", "document"),
                 (
                     "When all limits are reached",
-                    "All 5-hour quotas are exhausted; no account remains to switch to",
+                    "No account remains usable because of quota limits",
                     "quota",
                 ),
                 ("When time runs out", "After your chosen duration", "history"),

@@ -56,3 +56,23 @@ def test_store_onboarding_preserves_direct_download_update_preferences(qt_app, m
         dialog.close()
         dialog.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.parametrize("packaged", [False, True])
+async def test_explicit_setup_reset_keeps_saved_accounts(migrated_db, monkeypatch, packaged):
+    from codex_account_manager.accounts.service import AccountService
+    from codex_account_manager.gui.onboarding import needs_setup
+    from codex_account_manager.storage.repositories import SettingsRepository
+
+    monkeypatch.setattr(package, "is_packaged", lambda: packaged)
+    accounts = AccountService()
+    profile = await accounts.create_profile("Saved account")
+    await accounts.profiles.bind_account(profile.id, "workspace", user_id="user")
+    settings = SettingsRepository()
+    await settings.set_many({"setup_completed": "false", "store_setup_completed": "true"})
+    assert await needs_setup()
+    saved = await accounts.list_profiles()
+    assert [p.alias for p in saved] == ["Saved account"]
+    assert saved[0].bound_account_id == "workspace" and saved[0].bound_user_id == "user"
+    await settings.set("setup_completed", "true")
+    assert not await needs_setup()

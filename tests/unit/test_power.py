@@ -287,13 +287,73 @@ def test_unused_reset_credits_do_not_restore_five_hour_capacity():
     )
 
 
-@pytest.mark.parametrize("percent,minutes", [(None, 300), (99, 300), (100, 10080), (100, None)])
-def test_only_verified_five_hour_exhaustion_triggers(percent, minutes):
+@pytest.mark.parametrize("percent,minutes", [(None, 300), (99, 300), (100, 60), (100, None)])
+def test_only_verified_supported_quota_exhaustion_triggers(percent, minutes):
     health = _health("a", allowed=False, quota=QuotaState.LIMITED_NO_RESET)
     assert not all_accounts_limited(
         [replace(health, primary_used_percent=percent, primary_window_minutes=minutes)],
         datetime.now(UTC),
     )
+
+
+@pytest.mark.parametrize("weekly_first", [False, True])
+def test_weekly_exhaustion_counts_even_with_five_hour_capacity(weekly_first):
+    now = datetime.now(UTC)
+    limited = replace(
+        _health("weekly", allowed=False, quota=QuotaState.LIMITED_WITH_RESET), last_checked_at=now
+    )
+    weekly = replace(
+        limited,
+        primary_window_minutes=10080 if weekly_first else 300,
+        primary_used_percent=100 if weekly_first else 12,
+        secondary_window_minutes=300 if weekly_first else 10080,
+        secondary_used_percent=12 if weekly_first else 100,
+    )
+    assert all_accounts_limited([weekly, limited], now)
+    for changes in (
+        {"ordinary_usage_allowed": True},
+        {"ordinary_usage_allowed": None},
+        {"stale": True},
+        {"error": "read failed"},
+        {"last_checked_at": now - timedelta(seconds=61)},
+        {"primary_used_percent" if weekly_first else "secondary_used_percent": float("nan")},
+    ):
+        assert not all_accounts_limited([replace(weekly, **changes), limited], now)
+
+
+async def test_weekly_exhaustion_starts_countdown_and_capacity_cancels_it(migrated_db, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from codex_account_manager.monitoring import power
+    from tests.fakes import ExecutionServer
+
+    monkeypatch.setattr(power, "CodexAppServer", lambda *_a, **_k: ExecutionServer())
+    accounts = AsyncMock()
+    weekly = replace(
+        _health("weekly", allowed=False, quota=QuotaState.LIMITED_NO_RESET),
+        primary_used_percent=25,
+        secondary_window_minutes=10080,
+        secondary_used_percent=100,
+    )
+    accounts.all_health.return_value = [weekly]
+    checks = power.PowerChecks(accounts)
+    plan = ShutdownPlan()
+    target = PowerTarget("limits")
+    plan.arm(target)
+    plan.observe(await checks.check(target), 0)
+    assert plan.remaining(0) == 120
+    accounts.all_health.return_value = [
+        replace(
+            weekly,
+            secondary_used_percent=0,
+            ordinary_usage_allowed=True,
+            quota_state=QuotaState.AVAILABLE,
+        )
+    ]
+    evidence = await checks.check(target)
+    assert not evidence.ready and evidence.values == {"count": 1}
+    plan.observe(evidence, 10)
+    assert plan.deadline is None
 
 
 def test_goal_completion_must_match_original_objective_and_budget():

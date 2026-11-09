@@ -4,16 +4,21 @@
 
 # QuotaCrew for Codex
 
-<img src="docs/images/hero-en.svg" width="1000" alt="Switch accounts. Keep creating. Account management, continuation and optional shutdown." />
+<img src="docs/images/hero-en.svg" width="1000" alt="Switch Codex accounts automatically. Resume your conversations automatically. Let your PC shut down when work is done." />
 
-**Switch accounts automatically. Keep unfinished work moving. Shut down when the job is done.**
+**Switch Codex accounts automatically. Resume your conversations automatically. Let your PC shut down when work is done.**
 
 A free, open-source Windows account manager for Codex Desktop and VS Code. Manage accounts, quotas and work in one window; enable automatic continuation and optional shutdown to suit your workflow.
 
-<p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><img src="docs/images/navigation/store-live-en.svg" width="720" height="112" alt="Now on Microsoft Store" /></a></p>
+<p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/en-us%20dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://get.microsoft.com/images/en-us%20light.svg" />
+  <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="520" alt="Download from the Microsoft Store" />
+</picture>
+</a></p>
 
 <div>
-<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><img src="docs/images/navigation/store-en.svg" width="246" height="44" alt="Get QuotaCrew for Codex from Microsoft Store" /></a>
 <a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download from GitHub" /></a>
 </div>
 
@@ -60,7 +65,7 @@ The plan badge can also show the subscription-period date recorded at sign-in wh
 
 **Python included · No Node.js required · Existing Codex history preserved**
 
-1. **Download and install.** Get QuotaCrew from [Microsoft Store](https://apps.microsoft.com/detail/9NM4VKLKS9PF), or install `QuotaCrew-Setup-0.4.1.exe` from the [latest GitHub release](https://github.com/erkanpulat/codex-quotacrew/releases/latest). For portable use, download `QuotaCrew-portable-0.4.1.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
+1. **Download and install.** Get QuotaCrew from [Microsoft Store](https://apps.microsoft.com/detail/9NM4VKLKS9PF), or install `QuotaCrew-Setup-0.4.2.exe` from the [latest GitHub release](https://github.com/erkanpulat/codex-quotacrew/releases/latest). For portable use, download `QuotaCrew-portable-0.4.2.zip`, extract the entire archive into a folder and open `QuotaCrew.exe`.
 2. **Choose your preferences.** The first-run assistant introduces monitoring, switching, continuation and tray options. If Codex CLI is missing, it offers the official Windows installation with your consent; an existing CLI installation is preserved.
 3. **Add your accounts.** Open **My accounts → Add account** and give the account a recognizable name. Complete sign-in in the terminal and default browser that open. You can copy the terminal’s sign-in link into another browser; keep the terminal open until QuotaCrew confirms the account was linked.
 
@@ -158,7 +163,7 @@ Search local conversations by project, source, title or folder and open the proj
 
 Leave a long task with Codex without waiting at your desk just to shut down the computer. Use account switching and continuation on their own, or add a shutdown plan when you need one.
 
-**Automatic shutdown** gives you three clear choices: finish a selected conversation, exhaust every saved account’s verified five-hour quota with no available account to switch to, or shut down after a set time. Work and limit conditions start a fixed **2-minute cancellation countdown** once verified and no other Codex work is active. The timer accepts **1–1440 minutes** (120 = two hours), including the final warning, and does not wait for work to finish. Plans require confirmation, last only for the current session and never forcibly close applications. [Shutdown conditions](docs/continuity.md#optional-windows-shutdown).
+**Automatic shutdown** gives you three clear choices: finish a selected conversation, verify that every saved account is blocked by its five-hour or weekly quota with no usable account remaining, or shut down after a set time. Work and limit conditions start a fixed **2-minute cancellation countdown** once verified and no other Codex work is active. The timer accepts **1–1440 minutes** (120 = two hours), including the final warning, and does not wait for work to finish. Plans require confirmation, last only for the current session and never forcibly close applications. [Shutdown conditions](docs/continuity.md#optional-windows-shutdown).
 
 ![Automatic shutdown with three conditions, a duration picker and plan summary](docs/images/power-en.png)
 
@@ -205,7 +210,11 @@ QuotaCrew has no telemetry or credential proxy. Codex connects to OpenAI for sig
 Download the Windows package, add your accounts and choose which steps to automate.
 
 <div>
-<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><img src="docs/images/navigation/store-en.svg" width="246" height="44" alt="Get QuotaCrew for Codex from Microsoft Store" /></a>
+<a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=en-US&amp;gl=US"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/en-us%20dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="https://get.microsoft.com/images/en-us%20light.svg" />
+  <img src="https://get.microsoft.com/images/en-us%20dark.svg" height="44" alt="Download from the Microsoft Store" />
+</picture></a>
 <a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-en.svg" width="226" height="44" alt="Download from GitHub" /></a>
 </div>
 

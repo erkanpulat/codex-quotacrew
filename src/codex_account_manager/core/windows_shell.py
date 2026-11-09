@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from codex_account_manager.core.errors import DesktopShortcutExistsError
 from codex_account_manager.core.logging import get_logger
 from codex_account_manager.platform import package
 
@@ -82,7 +83,7 @@ def create_desktop_shortcut(*, destination: Path | None = None) -> Path:
             else "QuotaCrew.lnk"
         )
         if path.exists():
-            raise FileExistsError("A QuotaCrew desktop shortcut already exists.")
+            raise DesktopShortcutExistsError("A QuotaCrew desktop shortcut already exists.")
         directory.mkdir(parents=True, exist_ok=True)
         if not getattr(sys, "frozen", False):
             return create_shortcuts(Path(__file__).resolve().parents[3], destinations=(directory,))[

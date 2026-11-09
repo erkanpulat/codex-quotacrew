@@ -28,6 +28,7 @@ from codex_account_manager.accounts.service import AccountService
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.core.events import bus
 from codex_account_manager.core.logging import get_logger
+from codex_account_manager.core.single_instance import SingleInstance
 from codex_account_manager.domain.states import HandoffReason
 from codex_account_manager.gui.about import AboutView
 from codex_account_manager.gui.accounts import AccountsView
@@ -74,6 +75,7 @@ class _EventBridge(QObject):
 class MainWindow(QMainWindow):
     def __init__(self, runner: AsyncRunner, *, dark: bool = True):
         super().__init__()
+        self._activation_message = SingleInstance().activation_message()
         self.runner = runner
         self.accounts = AccountService()
         self._dark = dark
@@ -1055,6 +1057,13 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def nativeEvent(self, event_type, message):
+        from codex_account_manager.gui.widgets import handle_window_activation
+
+        if handle_window_activation(self, event_type, message):
+            return True, 0
+        return super().nativeEvent(event_type, message)
 
     def _show_work(self) -> None:
         self.nav.setCurrentRow(2)

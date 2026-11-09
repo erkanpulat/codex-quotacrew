@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,8 @@ def main() -> None:
     sentinel = data_dir / "installer-preservation-test.txt"
     sentinel.write_bytes(b"Synthetic user data must survive installation and removal.\n")
     expected = sentinel.read_bytes()
+    database = data_dir / "accounts.db"
+    saved_rows = {}
     with tempfile.TemporaryDirectory(
         prefix="account-manager-install-", dir=os.environ["RUNNER_TEMP"]
     ) as temporary:
@@ -76,6 +79,28 @@ def main() -> None:
                     raise RuntimeError("Previous version did not install for upgrade verification.")
                 if sentinel.read_bytes() != expected:
                     raise RuntimeError("Previous installation modified user data.")
+                old_cli = str(destination / "cli/cx.exe")
+                subprocess.run(
+                    [old_cli, "profile", "add", "Upgrade Çalışma"], check=True, timeout=60
+                )
+                with sqlite3.connect(database) as db:
+                    profile_id = db.execute("SELECT id FROM profiles").fetchone()[0]
+                    db.execute(
+                        "INSERT INTO profile_accounts (profile_id,account_id,bound_at) VALUES (?,?,?)",
+                        (profile_id, "synthetic-workspace", "2026-01-01"),
+                    )
+                    columns = {row[1] for row in db.execute("PRAGMA table_info(profile_accounts)")}
+                    if "user_id" in columns:
+                        db.execute("UPDATE profile_accounts SET user_id='synthetic-user'")
+                    db.execute(
+                        "INSERT OR REPLACE INTO settings VALUES ('monitor_enabled','false','2026-01-01')"
+                    )
+                    for table in ("profiles", "profile_accounts", "settings"):
+                        cursor = db.execute(f"SELECT * FROM {table} ORDER BY 1")
+                        saved_rows[table] = (
+                            [column[0] for column in cursor.description],
+                            cursor.fetchall(),
+                        )
             subprocess.run(
                 [
                     str(installers[0].resolve()),
@@ -108,6 +133,19 @@ def main() -> None:
             if startup_command() != f'"{executable}"':
                 raise RuntimeError("Start-with-Windows entry is missing or incorrectly quoted.")
             subprocess.run([str(destination / "cli/cx.exe"), "--help"], check=True, timeout=60)
+            if saved_rows:
+                subprocess.run([str(destination / "cli/cx.exe"), "init"], check=True, timeout=60)
+                with sqlite3.connect(database) as db:
+                    if db.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                        raise RuntimeError("Upgraded account database is invalid.")
+                    for table, (columns, rows) in saved_rows.items():
+                        actual = db.execute(
+                            f"SELECT {','.join(columns)} FROM {table} ORDER BY 1"
+                        ).fetchall()
+                        if actual != rows:
+                            raise RuntimeError(f"Upgrade changed saved {table}.")
+                db.close()
+                expected_database = database.read_bytes()
             if sentinel.read_bytes() != expected:
                 raise RuntimeError("Installation modified existing user data.")
             legacy_executable = destination / "CodexAccountManager.exe"
@@ -164,8 +202,10 @@ def main() -> None:
             )
         if sentinel.read_bytes() != expected:
             raise RuntimeError("Uninstall modified existing user data.")
+        if saved_rows and database.read_bytes() != expected_database:
+            raise RuntimeError("Reinstallation or uninstall modified the account database.")
     sentinel.unlink()
-    data_dir.rmdir()
+    # Account fixtures remain on this disposable runner for failure diagnostics.
     print("Installation, CLI, shortcuts, startup entry and user-data preservation verified.")
 
 

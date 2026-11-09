@@ -69,15 +69,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release download v0.3.1 --pattern 'QuotaCrew-Setup-0.3.1.exe' --pattern 'SHA256SUMS.txt' --dir build/previous-release
+          $previousTag = gh release view --json tagName --jq '.tagName'
+          if ($LASTEXITCODE -ne 0 -or $previousTag -notmatch '^v?\d+\.\d+\.\d+$') { throw 'Previous stable release lookup failed' }
+          $previousVersion = $previousTag.TrimStart('v')
+          if ([version]$previousVersion -ge [version]$env:RELEASE_VERSION) { throw 'Previous release must be older than the candidate' }
+          $previousName = "QuotaCrew-Setup-$previousVersion.exe"
+          gh release download $previousTag --pattern $previousName --pattern 'SHA256SUMS.txt' --dir build/previous-release
           if ($LASTEXITCODE -ne 0) { throw 'Previous release download failed' }
-          $previous = 'build/previous-release/QuotaCrew-Setup-0.3.1.exe'
+          $previous = "build/previous-release/$previousName"
           $digest = (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant()
           $lines = Get-Content build/previous-release/SHA256SUMS.txt
-          if ($lines -notcontains "$digest  QuotaCrew-Setup-0.3.1.exe") { throw 'Previous installer checksum mismatch' }
+          if ($lines -notcontains "$digest  $previousName") { throw 'Previous installer checksum mismatch' }
+          "QUOTACREW_PREVIOUS_INSTALLER=$previous" >> $env:GITHUB_ENV
       - run: python scripts/verify_windows_installer.py
-        env:
-          QUOTACREW_PREVIOUS_INSTALLER: build/previous-release/QuotaCrew-Setup-0.3.1.exe
       - name: Build portable archive
         shell: pwsh
         run: |

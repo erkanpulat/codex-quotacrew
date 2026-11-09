@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from codex_account_manager.storage.migrations import TARGET_VERSION, migrate
 from tests.fakes import account_identity
 
@@ -18,6 +20,24 @@ async def test_migrate_creates_all_tables(tmp_paths):
         "handoffs",
         "events",
     } <= tables
+
+
+async def test_newer_database_is_rejected_without_changing_accounts(tmp_paths):
+    from codex_account_manager.core.errors import DatabaseVersionError
+
+    await migrate()
+    with sqlite3.connect(tmp_paths.db_path) as db:
+        db.execute(
+            "INSERT INTO profiles (id, alias, codex_home, created_at) VALUES ('saved','Saved','home','2026')"
+        )
+        db.execute(
+            "UPDATE schema_meta SET value=? WHERE key='schema_version'", (str(TARGET_VERSION + 1),)
+        )
+    db.close()
+    before = tmp_paths.db_path.read_bytes()
+    with pytest.raises(DatabaseVersionError):
+        await migrate()
+    assert tmp_paths.db_path.read_bytes() == before
 
 
 async def test_migrate_is_idempotent(tmp_paths):
@@ -127,8 +147,6 @@ async def test_forward_migration_preserves_data_and_releases_backup(tmp_paths, m
 
 
 async def test_failed_migration_rolls_back_schema_and_version(tmp_paths, monkeypatch):
-    import pytest
-
     import codex_account_manager.storage.migrations as module
 
     await migrate()
@@ -169,14 +187,14 @@ async def test_repair_missing_goals_uses_current_columns(tmp_paths):
 
 
 async def test_invalid_and_future_versions_are_not_overwritten(tmp_paths):
-    import pytest
+    from codex_account_manager.core.errors import DatabaseVersionError
 
     await migrate()
-    for value in ("invalid", "999"):
+    for value, error in (("invalid", RuntimeError), ("999", DatabaseVersionError)):
         with sqlite3.connect(tmp_paths.db_path) as con:
             con.execute("UPDATE schema_meta SET value=? WHERE key='schema_version'", (value,))
         con.close()
-        with pytest.raises(RuntimeError):
+        with pytest.raises(error):
             await migrate()
         with sqlite3.connect(tmp_paths.db_path) as con:
             assert (
@@ -189,8 +207,6 @@ async def test_invalid_and_future_versions_are_not_overwritten(tmp_paths):
 
 
 async def test_missing_database_with_signins_is_not_recreated(tmp_paths):
-    import pytest
-
     from codex_account_manager.core.errors import AccountRecoveryRequired
 
     auth = tmp_paths.profiles_dir / "saved" / "auth.json"
@@ -203,8 +219,6 @@ async def test_missing_database_with_signins_is_not_recreated(tmp_paths):
 
 
 async def test_empty_catalogue_with_signins_is_not_migrated(tmp_paths):
-    import pytest
-
     from codex_account_manager.core.errors import AccountRecoveryRequired
 
     await migrate()

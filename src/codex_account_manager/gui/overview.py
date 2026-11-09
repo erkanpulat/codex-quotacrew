@@ -258,6 +258,7 @@ class DashboardView(BaseView):
                 )
             )
         ]
+        self.controls.set_filter_result(len(health), len(self._health))
         if not health:
             empty = EmptyState(
                 tr("No matching profiles") if self._health else tr("Bring your first account"),
