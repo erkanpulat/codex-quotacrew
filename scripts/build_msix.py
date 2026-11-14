@@ -134,7 +134,7 @@ def create_manifest(
     keys = node(registry, "ExcludedKeys", namespace=VIRTUALIZATION)
     node(keys, "ExcludedKey", "HKEY_CURRENT_USER\\Environment", namespace=VIRTUALIZATION)
     resources = node(package, "Resources")
-    for language in ("en-US", "tr-TR"):
+    for language in ("en-US", "tr-TR", "pt-BR"):
         node(resources, "Resource", Language=language)
     dependencies = node(package, "Dependencies")
     node(

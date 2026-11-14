@@ -1,8 +1,10 @@
-"""English source messages and Turkish translations for the desktop interface."""
+"""English, Turkish and Brazilian Portuguese messages for the desktop interface."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from codex_account_manager.gui.i18n_pt_br import PT_BR
 
 if TYPE_CHECKING:
     from codex_account_manager.continuity.tracking import ObservedWork
@@ -10,9 +12,15 @@ if TYPE_CHECKING:
 _language = "en"
 
 
+def language_for_locale(locale_name: str) -> str:
+    """Choose a supported language for a Qt-style system locale."""
+    prefix = locale_name.replace("-", "_").split("_", 1)[0].lower()
+    return {"pt": "pt_BR", "tr": "tr"}.get(prefix, "en")
+
+
 def set_language(value: str) -> None:
     global _language
-    _language = value if value in {"tr", "en"} else "en"
+    _language = value if value in {"tr", "en", "pt_BR"} else "en"
 
 
 def language() -> str:
@@ -20,9 +28,8 @@ def language() -> str:
 
 
 def tr(message: str, **values: object) -> str:
-    translated = (
-        TR.get(message, EN.get(message, message)) if _language == "tr" else EN.get(message, message)
-    )
+    catalog = PT_BR if _language == "pt_BR" else TR if _language == "tr" else EN
+    translated = catalog.get(message, EN.get(message, message))
     return translated.format(**values) if values else translated
 
 
@@ -891,8 +898,11 @@ def diagnostic_name(name: str) -> str:
         "timestamp": ("Check time (UTC)", "Kontrol zamanı (UTC)"),
     }
     if name.startswith("profile:"):
-        return ("Hesap: " if language() == "tr" else "Account: ") + name.split(":", 1)[1]
+        prefix = {"tr": "Hesap: ", "pt_BR": "Conta: "}.get(language(), "Account: ")
+        return prefix + name.split(":", 1)[1]
     value = names.get(name)
+    if language() == "pt_BR":
+        return tr(value[0]) if value else name
     return value[language() == "tr"] if value else name
 
 
@@ -925,6 +935,8 @@ _STATE_LABELS = {
 
 def state_label(value: str) -> str:
     labels = _STATE_LABELS.get(value)
+    if language() == "pt_BR":
+        return tr(labels[0]) if labels else value
     return labels[language() == "tr"] if labels else value
 
 
@@ -986,6 +998,15 @@ def work_status(work: ObservedWork) -> tuple[str, str]:
 
 
 def diagnostic_detail(name: str, ok: bool, detail: str) -> str:
+    if language() == "pt_BR":
+        if name.startswith("profile:"):
+            return (
+                "Login: "
+                + ("presente" if "auth=yes" in detail else "ausente")
+                + " · Conta vinculada: "
+                + ("sim" if "bound=yes" in detail else "não")
+            )
+        return tr(detail)
     if language() != "tr":
         return detail
     if name == "desktop_installed":

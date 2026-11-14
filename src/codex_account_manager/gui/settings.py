@@ -124,6 +124,7 @@ class SettingsView(BaseView):
         setting_row(general_layout, tr("Appearance"), "", self.theme)
 
         self.language = ComboBox()
+        self.language.addItem("Português (Brasil)", "pt_BR")
         self.language.addItem("Türkçe", "tr")
         self.language.addItem("English", "en")
         self.language.setCurrentIndex(self.language.findData(language()))

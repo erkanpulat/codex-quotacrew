@@ -24,7 +24,7 @@ A free, open-source Windows account manager for Codex Desktop and VS Code. Manag
 
 [How it works](#continuation-flow) · [Get started](#get-started) · [Türkçe](README.tr.md)
 
-Windows · English / Türkçe · Light & dark themes · MIT
+Windows · English / Türkçe / Português (Brasil) · Light & dark themes · MIT
 
 <a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=GitHub%20downloads&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release asset downloads" /></a>
 <br><sub>Microsoft Store downloads are not included.</sub>
