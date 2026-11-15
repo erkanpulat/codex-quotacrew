@@ -28,10 +28,10 @@ def run_gui() -> int:
         from PySide6.QtCore import QLocale
         from PySide6.QtWidgets import QApplication, QMessageBox
 
-        from codex_account_manager.gui.i18n import set_language, tr
+        from codex_account_manager.gui.i18n import language_for_locale, set_language, tr
 
         app = QApplication.instance() or QApplication(sys.argv)
-        set_language("tr" if QLocale.system().name().startswith("tr") else "en")
+        set_language(language_for_locale(QLocale.system().name()))
         title, message = (
             (
                 "Newer QuotaCrew version required",
@@ -78,10 +78,10 @@ def run_gui() -> int:
     from PySide6.QtGui import QFontDatabase
     from PySide6.QtWidgets import QApplication
 
-    from codex_account_manager.gui.i18n import set_language, tr
+    from codex_account_manager.gui.i18n import language_for_locale, set_language, tr
     from codex_account_manager.storage.repositories import SettingsRepository
 
-    default_language = "tr" if QLocale.system().name().startswith("tr") else "en"
+    default_language = language_for_locale(QLocale.system().name())
     selected_language = asyncio.run(SettingsRepository().get("language", default_language))
     selected_theme = asyncio.run(SettingsRepository().get("theme", "dark"))
     set_language(selected_language or default_language)
@@ -106,8 +106,9 @@ def run_gui() -> int:
     app.setApplicationName("QuotaCrew")
     app.setApplicationDisplayName(tr("QuotaCrew"))
     translator = QTranslator(app)
-    if selected_language == "tr" and translator.load(
-        "qtbase_tr", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    qt_language = {"tr": "tr", "pt_BR": "pt_BR"}.get(selected_language or "")
+    if qt_language and translator.load(
+        "qtbase_" + qt_language, QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
     ):
         app.installTranslator(translator)
     app.setWindowIcon(app_icon())

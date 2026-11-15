@@ -24,7 +24,7 @@ Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneti
 
 [Nasıl çalışır?](#devam-akışı) · [Kurulum](#kurulum) · [English](README.md)
 
-Windows · Türkçe / English · Açık ve koyu tema · MIT
+Windows · Türkçe / English / Português (Brasil) · Açık ve koyu tema · MIT
 
 <a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=GitHub%20indirmeleri&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release dosyalarının indirme sayısı" /></a>
 <br><sub>Microsoft Store indirmeleri bu sayıya dahil değildir.</sub>

@@ -284,11 +284,13 @@ class AccountRow(QFrame):
             local = until.astimezone()
             now = datetime.now().astimezone()
             if local > now:
-                pattern = "%d.%m" if language() == "tr" else "%m/%d"
+                pattern, full_pattern = {
+                    "tr": ("%d.%m", "%d.%m.%Y"),
+                    "pt_BR": ("%d/%m", "%d/%m/%Y"),
+                }.get(language(), ("%m/%d", "%m/%d/%Y"))
                 if local.year != now.year:
                     pattern += ".%y" if language() == "tr" else "/%y"
                 plan_text += " · " + local.strftime(pattern)
-                full_pattern = "%d.%m.%Y" if language() == "tr" else "%m/%d/%Y"
                 plan_tip = tr(
                     "Subscription period recorded at sign-in: {date}. Renewal or cancellation is not confirmed.",
                     date=local.strftime(full_pattern),
