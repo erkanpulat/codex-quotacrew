@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.3 (Unreleased)
+## 0.4.3 (2026-11-15)
 
 - Add Brazilian Portuguese (pt-BR) with automatic language selection on Portuguese systems and a manual language option in Settings.
 - Format subscription dates in Brazilian Portuguese using day/month order.
