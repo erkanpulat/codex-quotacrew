@@ -2657,7 +2657,7 @@ def test_cancelled_work_preparation_cannot_arm_a_plan(window, monkeypatch):
     assert widget.schedule_button.isEnabled() == (os.name == "nt")
 
 
-@pytest.mark.parametrize("locale", ["tr", "en"])
+@pytest.mark.parametrize("locale", ["tr", "en", "pt_BR"])
 @pytest.mark.parametrize("next_year", [False, True])
 def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(app, locale, next_year):
     from dataclasses import replace
@@ -2668,22 +2668,27 @@ def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(app, 
 
     now = datetime.now().astimezone()
     until = now.replace(year=now.year + int(next_year), month=12, day=31, hour=23, minute=59)
+    checked = now.replace(month=1, day=2)
     health = replace(
         sample_profiles()[0],
         plan_type="plus",
         account_match=True,
         subscription_until=until,
-        subscription_checked_at=now,
+        subscription_checked_at=checked,
         stale=False,
     )
     set_language(locale)
     try:
         card = AccountRow(health)
-        expected = "31.12" if locale == "tr" else "12/31"
+        expected = {"tr": "31.12", "en": "12/31", "pt_BR": "31/12"}[locale]
+        separator = "." if locale == "tr" else "/"
+        full_date = expected + separator + str(until.year)
         if next_year:
-            expected += ("." if locale == "tr" else "/") + until.strftime("%y")
+            expected += separator + until.strftime("%y")
         assert card._plan.text() == "Plus · " + expected
-        assert str(until.year) in card._plan.toolTip()
+        assert full_date in card._plan.toolTip()
+        checked_date = {"tr": "02.01.", "en": "01/02/", "pt_BR": "02/01/"}[locale]
+        assert checked_date + str(checked.year) in card._plan.toolTip()
         for changes in ({"stale": True}, {"account_match": False}, {"subscription_until": now}):
             hidden = AccountRow(replace(health, **changes))
             assert hidden._plan.text() == "Plus"

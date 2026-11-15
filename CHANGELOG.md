@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 (Unreleased)
+
+- Add Brazilian Portuguese (pt-BR) with automatic language selection on Portuguese systems and a manual language option in Settings.
+- Format subscription dates in Brazilian Portuguese using day/month order.
+
 ## 0.4.2 (2026-11-07)
 
 - Allow quota-based shutdown when every saved account is verified limited by either its five-hour or weekly quota.
