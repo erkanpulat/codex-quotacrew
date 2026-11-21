@@ -3,10 +3,10 @@
 Manage multiple Codex accounts, compare remaining quotas and continue verified
 quota-interrupted conversations from one Windows application.
 
-[English guide](https://github.com/erkanpulat/codex-quotacrew#readme) ·
-[Türkçe rehber](https://github.com/erkanpulat/codex-quotacrew/blob/main/README.tr.md) ·
-[Downloads](https://github.com/erkanpulat/codex-quotacrew/releases/latest) ·
-[Security](https://github.com/erkanpulat/codex-quotacrew/blob/main/SECURITY.md)
+[English guide](https://github.com/erkanpulat/quotacrew-codex-auto-resume#readme) ·
+[Türkçe rehber](https://github.com/erkanpulat/quotacrew-codex-auto-resume/blob/main/README.tr.md) ·
+[Downloads](https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest) ·
+[Security](https://github.com/erkanpulat/quotacrew-codex-auto-resume/blob/main/SECURITY.md)
 
 ## Get started
 

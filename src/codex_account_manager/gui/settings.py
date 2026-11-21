@@ -24,6 +24,7 @@ from codex_account_manager.gui.i18n import (
     language,
     tr,
 )
+from codex_account_manager.gui.locales import LOCALES
 from codex_account_manager.gui.view_base import BaseView, setting_row, view_header
 from codex_account_manager.gui.widgets import ComboBox, ToggleSwitch
 from codex_account_manager.storage.repositories import SettingsRepository
@@ -124,9 +125,8 @@ class SettingsView(BaseView):
         setting_row(general_layout, tr("Appearance"), "", self.theme)
 
         self.language = ComboBox()
-        self.language.addItem("Português (Brasil)", "pt_BR")
-        self.language.addItem("Türkçe", "tr")
-        self.language.addItem("English", "en")
+        for code, locale in LOCALES.items():
+            self.language.addItem(locale.name, code)
         self.language.setCurrentIndex(self.language.findData(language()))
         self.language.currentIndexChanged.connect(self._save_language)
         setting_row(

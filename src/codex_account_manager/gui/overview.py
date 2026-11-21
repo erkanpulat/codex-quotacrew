@@ -22,9 +22,7 @@ from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.gui.account_table import AccountControls, AccountTable, account_sort_key
 from codex_account_manager.gui.async_runner import AsyncRunner
 from codex_account_manager.gui.design import DARK, make_icon, set_button_icon
-from codex_account_manager.gui.i18n import (
-    tr,
-)
+from codex_account_manager.gui.i18n import format_timestamp, tr
 from codex_account_manager.gui.view_base import BaseView, EmptyState, view_header
 from codex_account_manager.gui.widgets import AccountRow, label
 
@@ -345,7 +343,7 @@ class DashboardView(BaseView):
                 count=len(work),
                 state=state,
                 goal=goal,
-                time=datetime.fromtimestamp(selected.observed_at).strftime("%d.%m %H:%M"),
+                time=format_timestamp(datetime.fromtimestamp(selected.observed_at), year=False),
             )
         )
 

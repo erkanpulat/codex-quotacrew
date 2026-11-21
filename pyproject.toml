@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-quotacrew"
-version = "0.4.3"
+version = "0.5.0"
 description = "QuotaCrew for Codex: multi-account management, quota monitoring and conversation continuation for Windows."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -42,10 +42,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/erkanpulat/codex-quotacrew"
-Repository = "https://github.com/erkanpulat/codex-quotacrew"
-Issues = "https://github.com/erkanpulat/codex-quotacrew/issues"
-Changelog = "https://github.com/erkanpulat/codex-quotacrew/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/erkanpulat/quotacrew-codex-auto-resume"
+Repository = "https://github.com/erkanpulat/quotacrew-codex-auto-resume"
+Issues = "https://github.com/erkanpulat/quotacrew-codex-auto-resume/issues"
+Changelog = "https://github.com/erkanpulat/quotacrew-codex-auto-resume/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 gui = ["PySide6==6.11.2"]

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QTableWidgetI
 from codex_account_manager.continuity.service import ContinuityService
 from codex_account_manager.core.redaction import redact_text
 from codex_account_manager.gui.design import DARK, make_icon
-from codex_account_manager.gui.i18n import state_label, tr
+from codex_account_manager.gui.i18n import format_timestamp, state_label, tr
 from codex_account_manager.gui.view_base import (
     BaseView,
     EmptyState,
@@ -121,7 +121,7 @@ class ActivityView(BaseView):
                 )
             for column, value in enumerate(
                 (
-                    handoff.started_at.astimezone().strftime("%d.%m.%Y %H:%M"),
+                    format_timestamp(handoff.started_at),
                     state_label(handoff.reason.value),
                     accounts,
                     state_label("inProgress")

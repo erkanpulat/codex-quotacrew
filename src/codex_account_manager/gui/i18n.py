@@ -1,26 +1,26 @@
-"""English, Turkish and Brazilian Portuguese messages for the desktop interface."""
+"""Localized messages for the desktop interface."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from codex_account_manager.gui.i18n_de import DE
+from codex_account_manager.gui.i18n_es import ES
+from codex_account_manager.gui.i18n_ja import JA
 from codex_account_manager.gui.i18n_pt_br import PT_BR
+from codex_account_manager.gui.locales import LOCALES
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from codex_account_manager.continuity.tracking import ObservedWork
 
 _language = "en"
 
 
-def language_for_locale(locale_name: str) -> str:
-    """Choose a supported language for a Qt-style system locale."""
-    prefix = locale_name.replace("-", "_").split("_", 1)[0].lower()
-    return {"pt": "pt_BR", "tr": "tr"}.get(prefix, "en")
-
-
 def set_language(value: str) -> None:
     global _language
-    _language = value if value in {"tr", "en", "pt_BR"} else "en"
+    _language = value if value in LOCALES else "en"
 
 
 def language() -> str:
@@ -28,9 +28,17 @@ def language() -> str:
 
 
 def tr(message: str, **values: object) -> str:
-    catalog = PT_BR if _language == "pt_BR" else TR if _language == "tr" else EN
-    translated = catalog.get(message, EN.get(message, message))
+    translated = _CATALOGS[_language].get(message, EN.get(message, message))
     return translated.format(**values) if values else translated
+
+
+def format_timestamp(value: datetime, *, year: bool = True, seconds: bool = False) -> str:
+    locale = LOCALES[_language]
+    short, _, full = locale.date_formats
+    short, full = locale.timestamp_dates or (short, full)
+    clock = "%H:%M:%S" if seconds else "%H:%M"
+    local = value.astimezone() if value.tzinfo is not None else value
+    return local.strftime(f"{full if year else short} {clock}")
 
 
 def error_message(message: str) -> str:
@@ -38,7 +46,7 @@ def error_message(message: str) -> str:
         return tr("Sign in again from My accounts. Your saved profile has been kept.")
     if "Another operation is in progress" in message:
         return tr("Another operation is in progress. Retry after it completes.")
-    if message in TR or message in EN:
+    if message in TR or message in EN or message in _CATALOGS[_language]:
         return tr(message)
     return tr("The operation could not be completed. See Activity or System check for details.")
 
@@ -80,6 +88,8 @@ EN = {
 }
 
 TR = {
+    "Local data could not be accessed or protected. Close other account operations and check the data folder permissions. Do not delete your account data.": "Yerel verilere erişilemedi veya veriler korunamadı. Diğer hesap işlemlerini kapatıp veri klasörünün izinlerini kontrol edin. Hesap verilerinizi silmeyin.",
+    "Stored sign-in data could not be recovered safely. Your files were retained. Use the original Windows user account and close other account operations before retrying.": "Kaydedilmiş giriş bilgileri güvenli biçimde kurtarılamadı. Dosyalarınız korundu. Özgün Windows hesabını kullanın ve yeniden denemeden önce diğer hesap işlemlerini kapatın.",
     "Newer QuotaCrew version required": "Daha yeni bir QuotaCrew sürümü gerekiyor",
     "This account database was updated by a newer QuotaCrew version. Install that version or a newer one. Do not delete or reset your account data.": "Hesap veritabanı daha yeni bir QuotaCrew sürümüyle güncellenmiş. O sürümü veya daha yenisini kurun. Hesap verilerinizi silmeyin veya sıfırlamayın.",
     "Codex workspace routing rejected discovery (401).": "Codex çalışma alanı bağlantısını reddetti (401). Bu bir kota sonucu değildir; bağlantı yeniden kontrol edilecek. Manuel hesap geçişi kullanılabilir.",
@@ -883,6 +893,9 @@ TR = {
 }
 
 
+_CATALOGS = {"en": EN, "tr": TR, "pt_BR": PT_BR, "es": ES, "ja": JA, "de": DE}
+
+
 def diagnostic_name(name: str) -> str:
     names = {
         "codex_cli": ("Codex CLI installation", "Codex CLI kurulumu"),
@@ -898,12 +911,14 @@ def diagnostic_name(name: str) -> str:
         "timestamp": ("Check time (UTC)", "Kontrol zamanı (UTC)"),
     }
     if name.startswith("profile:"):
-        prefix = {"tr": "Hesap: ", "pt_BR": "Conta: "}.get(language(), "Account: ")
-        return prefix + name.split(":", 1)[1]
+        alias = name.split(":", 1)[1]
+        if language() == "tr":
+            return f"Hesap: {alias}"
+        return tr("Account: {alias}", alias=alias)
     value = names.get(name)
-    if language() == "pt_BR":
-        return tr(value[0]) if value else name
-    return value[language() == "tr"] if value else name
+    if value is None:
+        return name
+    return value[1] if language() == "tr" else tr(value[0])
 
 
 _STATE_LABELS = {
@@ -935,9 +950,9 @@ _STATE_LABELS = {
 
 def state_label(value: str) -> str:
     labels = _STATE_LABELS.get(value)
-    if language() == "pt_BR":
-        return tr(labels[0]) if labels else value
-    return labels[language() == "tr"] if labels else value
+    if labels is None:
+        return value
+    return labels[1] if language() == "tr" else tr(labels[0])
 
 
 def work_status(work: ObservedWork) -> tuple[str, str]:
@@ -998,17 +1013,23 @@ def work_status(work: ObservedWork) -> tuple[str, str]:
 
 
 def diagnostic_detail(name: str, ok: bool, detail: str) -> str:
-    if language() == "pt_BR":
-        if name.startswith("profile:"):
-            return (
-                "Login: "
-                + ("presente" if "auth=yes" in detail else "ausente")
-                + " · Conta vinculada: "
-                + ("sim" if "bound=yes" in detail else "não")
-            )
-        return tr(detail)
-    if language() != "tr":
+    if language() == "en":
         return detail
+    if language() != "tr":
+        if name.startswith("profile:"):
+            return tr(
+                "Sign-in data: {auth} · Account linked: {bound}",
+                auth=tr("Present") if "auth=yes" in detail else tr("Missing"),
+                bound=tr("Yes") if "bound=yes" in detail else tr("No"),
+            )
+        if name == "codex_version" and not ok:
+            return tr(
+                "Could not read the Codex version. Run codex --version in a terminal. Details: {detail}",
+                detail=detail,
+            )
+        if name == "shared_codex_home" and detail.startswith("Missing: "):
+            return tr("Missing: {path}", path=detail.removeprefix("Missing: "))
+        return tr(detail)
     if name == "desktop_installed":
         return tr(detail)
     messages = {

@@ -9,7 +9,7 @@ Build the GUI (`QuotaCrew.exe`), CLI (`cx.exe`), installer and portable ZIP from
 3. Run **Actions → Publish release** with that version. It tests, scans and builds the committed source, verifies installation and upgrade, then publishes the installer, portable ZIP and `SHA256SUMS.txt`.
 4. Verify the completed workflow and release. Installed clients detect a higher stable version on their daily check or through **Check for updates**. Replacing files under an existing version does not trigger another update.
 
-The updater uses `erkanpulat/codex-quotacrew` and GitHub's SHA-256 asset digest. A checksum verifies integrity; the binaries are not code-signed. Keep account data, credentials and local build output out of Git.
+The updater uses `erkanpulat/quotacrew-codex-auto-resume` and GitHub's SHA-256 asset digest. A checksum verifies integrity; the binaries are not code-signed. Keep account data, credentials and local build output out of Git.
 
 ## Local build
 

@@ -49,7 +49,7 @@ def test_manifest_declares_store_updates_user_controlled_startup_and_shared_data
     assert root.find("f:Identity", namespaces).get("Version") == "0.2.1.0"
     assert {
         resource.get("Language") for resource in root.findall("f:Resources/f:Resource", namespaces)
-    } == {"en-US", "tr-TR", "pt-BR"}
+    } == {"en-US", "tr-TR", "pt-BR", "es", "ja-JP", "de-DE"}
     startup_task = root.find(".//d:StartupTask", namespaces)
     assert startup_task.get("Enabled") == "false"
     assert startup_task.get("TaskId") == "QuotaCrewStartup"

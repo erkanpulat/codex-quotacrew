@@ -19,19 +19,24 @@ from codex_account_manager.storage.database import initialize_database
 log = get_logger(__name__)
 
 
+def _show_startup_error(title: str, message: str) -> None:
+    from PySide6.QtCore import QLocale
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from codex_account_manager.gui.i18n import set_language, tr
+    from codex_account_manager.gui.locales import language_for_locale
+
+    _app = QApplication.instance() or QApplication(sys.argv)
+    set_language(language_for_locale(QLocale.system().name()))
+    QMessageBox.critical(None, tr(title), tr(message))
+
+
 def run_gui() -> int:
     try:
         configure_logging()
         log.info("QuotaCrew started (pid=%d).", os.getpid())
         asyncio.run(initialize_database())
     except (AccountRecoveryRequired, DatabaseVersionError) as exc:
-        from PySide6.QtCore import QLocale
-        from PySide6.QtWidgets import QApplication, QMessageBox
-
-        from codex_account_manager.gui.i18n import language_for_locale, set_language, tr
-
-        app = QApplication.instance() or QApplication(sys.argv)
-        set_language(language_for_locale(QLocale.system().name()))
         title, message = (
             (
                 "Newer QuotaCrew version required",
@@ -43,17 +48,12 @@ def run_gui() -> int:
                 "Saved sign-in files exist, but the account list is missing. Startup was stopped to protect your data. Do not reset or delete the data folder. Restore the account database from a verified backup.",
             )
         )
-        QMessageBox.critical(None, tr(title), tr(message))
+        _show_startup_error(title, message)
         return 1
     except OSError:
-        from PySide6.QtWidgets import QApplication, QMessageBox
-
-        app = QApplication.instance() or QApplication(sys.argv)
-        QMessageBox.critical(
-            None,
+        _show_startup_error(
             "QuotaCrew",
-            "Local data could not be accessed or protected. Close other account operations and check the data folder permissions. Do not delete your account data.\n\n"
-            "Yerel verilere erişilemedi veya veriler korunamadı. Diğer hesap işlemlerini kapatıp veri klasörünün izinlerini kontrol edin. Hesap verilerinizi silmeyin.",
+            "Local data could not be accessed or protected. Close other account operations and check the data folder permissions. Do not delete your account data.",
         )
         return 1
     from codex_account_manager.auth.transaction import AuthTransaction
@@ -61,16 +61,10 @@ def run_gui() -> int:
     try:
         AuthTransaction().recover()
     except (CredentialProtectionError, TransactionError, OSError, ValueError):
-        from PySide6.QtWidgets import QApplication, QMessageBox
-
-        app = QApplication.instance() or QApplication(sys.argv)
-        QMessageBox.critical(
-            None,
+        _show_startup_error(
             "QuotaCrew",
             "Stored sign-in data could not be recovered safely. Your files were retained. "
-            "Use the original Windows user account and close other account operations before retrying.\n\n"
-            "Kaydedilmiş giriş bilgileri güvenli biçimde kurtarılamadı. Dosyalarınız korundu. "
-            "Özgün Windows hesabını kullanın ve yeniden denemeden önce diğer hesap işlemlerini kapatın.",
+            "Use the original Windows user account and close other account operations before retrying.",
         )
         return 1
 
@@ -78,7 +72,8 @@ def run_gui() -> int:
     from PySide6.QtGui import QFontDatabase
     from PySide6.QtWidgets import QApplication
 
-    from codex_account_manager.gui.i18n import language_for_locale, set_language, tr
+    from codex_account_manager.gui.i18n import language, set_language, tr
+    from codex_account_manager.gui.locales import LOCALES, language_for_locale
     from codex_account_manager.storage.repositories import SettingsRepository
 
     default_language = language_for_locale(QLocale.system().name())
@@ -106,7 +101,7 @@ def run_gui() -> int:
     app.setApplicationName("QuotaCrew")
     app.setApplicationDisplayName(tr("QuotaCrew"))
     translator = QTranslator(app)
-    qt_language = {"tr": "tr", "pt_BR": "pt_BR"}.get(selected_language or "")
+    qt_language = LOCALES[language()].qt_catalog
     if qt_language and translator.load(
         "qtbase_" + qt_language, QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
     ):

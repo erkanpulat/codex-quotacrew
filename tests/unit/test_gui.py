@@ -123,9 +123,9 @@ def test_support_buttons_open_only_public_project_links(window, monkeypatch):
             button for button in view.findChildren(QPushButton) if button.text() == tr(title)
         ).click()
     assert opened == [
-        "https://github.com/erkanpulat/codex-quotacrew",
-        "https://github.com/erkanpulat/codex-quotacrew/issues",
-        "https://github.com/erkanpulat/codex-quotacrew/pulls",
+        "https://github.com/erkanpulat/quotacrew-codex-auto-resume",
+        "https://github.com/erkanpulat/quotacrew-codex-auto-resume/issues",
+        "https://github.com/erkanpulat/quotacrew-codex-auto-resume/pulls",
         "https://github.com/erkanpulat",
     ]
 
@@ -2657,9 +2657,21 @@ def test_cancelled_work_preparation_cannot_arm_a_plan(window, monkeypatch):
     assert widget.schedule_button.isEnabled() == (os.name == "nt")
 
 
-@pytest.mark.parametrize("locale", ["tr", "en", "pt_BR"])
+@pytest.mark.parametrize(
+    "locale,short,cross_year,full,checked_date",
+    [
+        ("tr", "31.12", "31.12.{yy}", "31.12.{year}", "02.01.{year}"),
+        ("en", "12/31", "12/31/{yy}", "12/31/{year}", "01/02/{year}"),
+        ("pt_BR", "31/12", "31/12/{yy}", "31/12/{year}", "02/01/{year}"),
+        ("es", "31/12", "31/12/{yy}", "31/12/{year}", "02/01/{year}"),
+        ("ja", "12/31", "{year}/12/31", "{year}/12/31", "{year}/01/02"),
+        ("de", "31.12.", "31.12.{yy}", "31.12.{year}", "02.01.{year}"),
+    ],
+)
 @pytest.mark.parametrize("next_year", [False, True])
-def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(app, locale, next_year):
+def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(
+    app, locale, short, cross_year, full, checked_date, next_year
+):
     from dataclasses import replace
     from datetime import datetime
 
@@ -2680,15 +2692,12 @@ def test_subscription_badge_uses_local_dates_and_hides_unreliable_metadata(app, 
     set_language(locale)
     try:
         card = AccountRow(health)
-        expected = {"tr": "31.12", "en": "12/31", "pt_BR": "31/12"}[locale]
-        separator = "." if locale == "tr" else "/"
-        full_date = expected + separator + str(until.year)
-        if next_year:
-            expected += separator + until.strftime("%y")
+        expected = (cross_year if next_year else short).format(
+            year=until.year, yy=until.strftime("%y")
+        )
         assert card._plan.text() == "Plus · " + expected
-        assert full_date in card._plan.toolTip()
-        checked_date = {"tr": "02.01.", "en": "01/02/", "pt_BR": "02/01/"}[locale]
-        assert checked_date + str(checked.year) in card._plan.toolTip()
+        assert full.format(year=until.year) in card._plan.toolTip()
+        assert checked_date.format(year=checked.year) in card._plan.toolTip()
         for changes in ({"stale": True}, {"account_match": False}, {"subscription_until": now}):
             hidden = AccountRow(replace(health, **changes))
             assert hidden._plan.text() == "Plus"

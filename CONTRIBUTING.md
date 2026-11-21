@@ -40,7 +40,7 @@ See the [security policy](SECURITY.md) and [continuation behavior](docs/continui
 
 ## Interface changes
 
-Add English/Turkish text through `gui/i18n.py` and use the shared theme and icons. Check both themes, small windows, long labels and empty states. `scripts/render_preview.py` produces screenshots with synthetic accounts; documentation images must not expose real user data.
+Use `tr()` from `gui/i18n.py` for interface text. Update the locale catalogs when wording changes, and preserve named format fields such as `{alias}`. `gui/locales.py` defines the language choices and MSIX language tags. Test both themes, small windows and empty states. Use synthetic accounts for preview and Store screenshots.
 
 ## Pull requests
 

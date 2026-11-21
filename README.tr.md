@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="packaging/assets/app.svg" width="88" height="88" alt="QuotaCrew — Windows indirme sayfasını aç" /></a>
+<a href="https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest"><img src="packaging/assets/app.svg" width="88" height="88" alt="QuotaCrew — Windows indirme sayfasını aç" /></a>
 
 # QuotaCrew for Codex
 
@@ -8,7 +8,7 @@
 
 **Codex hesapların otomatik değişsin, sohbetlerin kaldığı yerden otomatik devam etsin. İşin bitince bilgisayarın kapansın.**
 
-Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneticisi. Hesaplarını, kotalarını ve işlerini tek pencereden yönet; otomatik devamı ve isteğe bağlı kapatmayı ihtiyacına göre aç.
+Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneticisi. Kotaları izle, hesapları otomatik değiştir ve kota sonrası uygun sohbetleri aynı konuşmada otomatik sürdür.
 
 <p><a href="https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&amp;gl=TR">
 <picture>
@@ -19,19 +19,19 @@ Codex Desktop ve VS Code için ücretsiz, açık kaynaklı Windows hesap yöneti
 </a></p>
 
 <div>
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="226" height="44" alt="GitHub’dan indirin" /></a>
+<a href="https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="226" height="44" alt="GitHub’dan indirin" /></a>
 </div>
 
 [Nasıl çalışır?](#devam-akışı) · [Kurulum](#kurulum) · [English](README.md)
 
 Windows · Türkçe / English / Português (Brasil) · Açık ve koyu tema · MIT
 
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/codex-quotacrew/total?style=for-the-badge&amp;label=GitHub%20indirmeleri&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release dosyalarının indirme sayısı" /></a>
+<a href="https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases"><img src="https://img.shields.io/github/downloads/erkanpulat/quotacrew-codex-auto-resume/total?style=for-the-badge&amp;label=GitHub%20indirmeleri&amp;logo=github&amp;logoColor=31d4a1&amp;labelColor=161e28&amp;color=2681f4" width="360" alt="GitHub release dosyalarının indirme sayısı" /></a>
 <br><sub>Microsoft Store indirmeleri bu sayıya dahil değildir.</sub>
 
 </div>
 
-[![QuotaCrew genel bakış ekranı: hesaplar, kalan kotalar ve yenilenme zamanları. İndirmek için tıklayın.](docs/images/overview-tr.png)](https://github.com/erkanpulat/codex-quotacrew/releases/latest)
+[![QuotaCrew genel bakış ekranı: hesaplar, kalan kotalar ve yenilenme zamanları. İndirmek için tıklayın.](docs/images/overview-tr.png)](https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest)
 
 *Gerçek uygulama ekranı; hesap bilgileri örnektir. Görsele tıklayarak indirme sayfasını açabilirsiniz.*
 
@@ -57,11 +57,11 @@ Genel Bakış ve Hesaplarım tabloları aynı arama, filtre, sıralama ve e-post
 
 ## Kurulum
 
-[![İndir, tercihlerini seç ve hesabını ekle. Windows indirmelerini açmak için tıklayın.](docs/images/installation-tr.svg)](https://github.com/erkanpulat/codex-quotacrew/releases/latest)
+[![İndir, tercihlerini seç ve hesabını ekle. Windows indirmelerini açmak için tıklayın.](docs/images/installation-tr.svg)](https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest)
 
 **Python pakete dahil · Node.js gerekmez · Mevcut Codex sohbetleriniz korunur**
 
-1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/codex-quotacrew/releases/latest) `QuotaCrew-Setup-0.4.3.exe` dosyasını indirip kurun. Taşınabilir kullanım için `QuotaCrew-portable-0.4.3.zip` dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
+1. **İndirin ve kurun.** QuotaCrew'u [Microsoft Store'dan](https://apps.microsoft.com/detail/9NM4VKLKS9PF?hl=tr-TR&gl=TR) edinin veya [son GitHub sürümündeki](https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest) Windows kurulum dosyasını indirin. Taşınabilir kullanım için taşınabilir ZIP dosyasının tamamını bir klasöre çıkarın ve içindeki `QuotaCrew.exe` dosyasını açın.
 2. **Tercihlerinizi seçin.** İlk açılış yardımcısı izleme, hesap geçişi, sohbet devamı ve tepsi seçeneklerini tanıtır. Codex CLI eksikse onayınızla resmî Windows kurulumunu başlatır; mevcut CLI kurulumunuzu korur.
 3. **Hesaplarınızı ekleyin.** **Hesaplarım → Hesap ekle** bölümünde hesabınıza bir ad verin. Açılan terminal ve varsayılan tarayıcıda girişinizi tamamlayın. Terminaldeki giriş bağlantısını başka bir tarayıcıya kopyalayabilirsiniz; QuotaCrew hesabın bağlandığını doğrulayana kadar terminali kapatmayın.
 
@@ -211,14 +211,14 @@ Windows paketini indirin, hesaplarınızı ekleyin ve hangi adımların otomatik
   <source media="(prefers-color-scheme: light)" srcset="https://get.microsoft.com/images/tr%20light.svg" />
   <img src="https://get.microsoft.com/images/tr%20dark.svg" height="44" alt="Microsoft Store’dan indirin" />
 </picture></a>
-<a href="https://github.com/erkanpulat/codex-quotacrew/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="226" height="44" alt="GitHub’dan indirin" /></a>
+<a href="https://github.com/erkanpulat/quotacrew-codex-auto-resume/releases/latest"><img src="docs/images/navigation/download-tr.svg" width="226" height="44" alt="GitHub’dan indirin" /></a>
 </div>
 
 ---
 
 ## Geliştirme ve katkı
 
-QuotaCrew açık kaynaklıdır. Fikirlerinizi [Issues](https://github.com/erkanpulat/codex-quotacrew/issues) üzerinden paylaşın, geliştirmelerinizi [pull request](https://github.com/erkanpulat/codex-quotacrew/pulls) ile gönderin. İşinize yaradıysa [projeye yıldız vererek](https://github.com/erkanpulat/codex-quotacrew) destek olabilirsiniz.
+QuotaCrew açık kaynaklıdır. Fikirlerinizi [Issues](https://github.com/erkanpulat/quotacrew-codex-auto-resume/issues) üzerinden paylaşın, geliştirmelerinizi [pull request](https://github.com/erkanpulat/quotacrew-codex-auto-resume/pulls) ile gönderin. İşinize yaradıysa [projeye yıldız vererek](https://github.com/erkanpulat/quotacrew-codex-auto-resume) destek olabilirsiniz.
 
 <details>
 <summary>Kaynaktan kurulum, CLI ve geliştirici kontrolleri</summary>
@@ -226,8 +226,8 @@ QuotaCrew açık kaynaklıdır. Fikirlerinizi [Issues](https://github.com/erkanp
 Python 3.11–3.13 ve Git gerekir. PowerShell'de:
 
 ```powershell
-git clone https://github.com/erkanpulat/codex-quotacrew.git
-cd codex-quotacrew
+git clone https://github.com/erkanpulat/quotacrew-codex-auto-resume.git
+cd quotacrew-codex-auto-resume
 ./scripts/bootstrap.ps1
 .venv/Scripts/quotacrew.exe
 ```

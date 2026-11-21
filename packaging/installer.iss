@@ -1,5 +1,5 @@
 #define AppName "QuotaCrew"
-#define AppVersion "0.4.3"
+#define AppVersion "0.5.0"
 #define AppExe "QuotaCrew.exe"
 #define AppPublisher "QuotaCrew contributors"
 #ifndef BundleRoot

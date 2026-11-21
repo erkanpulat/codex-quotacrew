@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (
 from codex_account_manager.domain.models import ProfileHealth
 from codex_account_manager.domain.states import QuotaState
 from codex_account_manager.gui.design import DARK, Palette, make_icon
-from codex_account_manager.gui.i18n import language, tr
+from codex_account_manager.gui.i18n import format_timestamp, language, tr
+from codex_account_manager.gui.locales import LOCALES
 
 
 def handle_window_activation(window: QWidget, event_type, message) -> bool:
@@ -178,7 +179,7 @@ def format_reset(value: int | None) -> str:
     if value is None:
         return tr("Unknown")
     try:
-        return datetime.fromtimestamp(value).astimezone().strftime("%d.%m.%Y %H:%M")
+        return format_timestamp(datetime.fromtimestamp(value))
     except (OSError, OverflowError, ValueError):
         return tr("Unknown")
 
@@ -284,12 +285,8 @@ class AccountRow(QFrame):
             local = until.astimezone()
             now = datetime.now().astimezone()
             if local > now:
-                pattern, full_pattern = {
-                    "tr": ("%d.%m", "%d.%m.%Y"),
-                    "pt_BR": ("%d/%m", "%d/%m/%Y"),
-                }.get(language(), ("%m/%d", "%m/%d/%Y"))
-                if local.year != now.year:
-                    pattern += ".%y" if language() == "tr" else "/%y"
+                short_pattern, cross_year_pattern, full_pattern = LOCALES[language()].date_formats
+                pattern = short_pattern if local.year == now.year else cross_year_pattern
                 plan_text += " · " + local.strftime(pattern)
                 plan_tip = tr(
                     "Subscription period recorded at sign-in: {date}. Renewal or cancellation is not confirmed.",
@@ -428,7 +425,7 @@ class AccountRow(QFrame):
             if health.stale and health.last_checked_at:
                 explanation += " " + tr(
                     "Last verified: {time}",
-                    time=health.last_checked_at.astimezone().strftime("%d.%m %H:%M"),
+                    time=format_timestamp(health.last_checked_at, year=False),
                 )
             notice = label(explanation, "Caption")
             notice.setWordWrap(True)
@@ -510,7 +507,7 @@ class AccountRow(QFrame):
         header_layout.addWidget(count_lbl)
         checked_text = tr(
             "Last checked: {time}",
-            time=health.last_checked_at.astimezone().strftime("%d.%m.%Y %H:%M")
+            time=format_timestamp(health.last_checked_at)
             if health.last_checked_at
             else tr("Unknown"),
         )

@@ -1,6 +1,16 @@
 """Brazilian Portuguese translations for the QuotaCrew interface."""
 
 PT_BR: dict[str, str] = {
+    "Account: {alias}": "Conta: {alias}",
+    "Sign-in data: {auth} · Account linked: {bound}": "Login: {auth} · Conta vinculada: {bound}",
+    "Present": "presente",
+    "Missing": "ausente",
+    "Yes": "sim",
+    "No": "não",
+    "Missing: {path}": "Não encontrado: {path}",
+    "Could not read the Codex version. Run codex --version in a terminal. Details: {detail}": "Não foi possível ler a versão do Codex. Execute codex --version em um terminal. Detalhes: {detail}",
+    "Local data could not be accessed or protected. Close other account operations and check the data folder permissions. Do not delete your account data.": "Não foi possível acessar ou proteger os dados locais. Encerre as outras operações de conta e verifique as permissões da pasta de dados. Não apague os dados das suas contas.",
+    "Stored sign-in data could not be recovered safely. Your files were retained. Use the original Windows user account and close other account operations before retrying.": "Não foi possível recuperar os dados de login com segurança. Seus arquivos foram preservados. Use a conta original do Windows e encerre as outras operações de conta antes de tentar novamente.",
     "Newer QuotaCrew version required": "É necessária uma versão mais recente do QuotaCrew",
     "This account database was updated by a newer QuotaCrew version. Install that version or a newer one. Do not delete or reset your account data.": "Este banco de contas foi atualizado por uma versão mais recente do QuotaCrew. Instale essa versão ou uma mais recente. Não apague nem redefina os dados das contas.",
     "Codex workspace routing rejected discovery (401).": "O roteamento de espaços de trabalho do Codex recusou a descoberta (401).",

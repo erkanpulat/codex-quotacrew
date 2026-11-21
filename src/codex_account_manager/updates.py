@@ -26,9 +26,12 @@ from codex_account_manager.core.paths import paths
 from codex_account_manager.core.windows_shell import launch_from_explorer
 from codex_account_manager.platform import package
 
-REPOSITORY = "erkanpulat/codex-quotacrew"
+REPOSITORY = "erkanpulat/quotacrew-codex-auto-resume"
+LEGACY_REPOSITORY = "erkanpulat/codex-quotacrew"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
+LEGACY_RELEASES_URL = f"https://github.com/{LEGACY_REPOSITORY}/releases"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
+LEGACY_API_URL = f"https://api.github.com/repos/{LEGACY_REPOSITORY}/releases/latest"
 MAX_INSTALLER_BYTES = 512 * 1024 * 1024
 VERSION = re.compile(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 
@@ -66,8 +69,12 @@ def parse_release(data: dict, current: str = __version__) -> Release | None:
     if version_tuple(tag) <= version_tuple(current):
         return None
     version = tag.removeprefix("v")
-    page = f"{RELEASES_URL}/tag/{tag}"
-    if data.get("html_url") != page:
+    page = data.get("html_url")
+    if page == f"{RELEASES_URL}/tag/{tag}":
+        release_root = RELEASES_URL
+    elif page == f"{LEGACY_RELEASES_URL}/tag/{tag}":
+        release_root = LEGACY_RELEASES_URL
+    else:
         raise UpdateError("The release source could not be verified.")
     filename = f"QuotaCrew-Setup-{version}.exe"
     assets = data.get("assets")
@@ -77,7 +84,7 @@ def parse_release(data: dict, current: str = __version__) -> Release | None:
     if len(matches) != 1:
         raise UpdateError("A verified Windows installer is not available for this release.")
     asset = matches[0]
-    url = f"{RELEASES_URL}/download/{tag}/{filename}"
+    url = f"{release_root}/download/{tag}/{filename}"
     size, digest = asset.get("size"), asset.get("digest")
     if (
         asset.get("browser_download_url") != url
@@ -124,17 +131,20 @@ def _open(url: str):
 
 def latest_release() -> Release | None:
     _require_direct_distribution()
-    try:
-        with _open(API_URL) as response:
-            body = response.read(1024 * 1024 + 1)
-        if len(body) > 1024 * 1024:
-            raise UpdateError("The release response is too large.")
-        data = json.loads(body)
-        if not isinstance(data, dict):
-            raise ValueError()
-        return parse_release(data)
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        raise UpdateError("Updates could not be checked. Try again later.") from exc
+    last_error: Exception | None = None
+    for api_url in (API_URL, LEGACY_API_URL):
+        try:
+            with _open(api_url) as response:
+                body = response.read(1024 * 1024 + 1)
+            if len(body) > 1024 * 1024:
+                raise UpdateError("The release response is too large.")
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError()
+            return parse_release(data)
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            last_error = exc
+    raise UpdateError("Updates could not be checked. Try again later.") from last_error
 
 
 def installed_directory() -> Path | None:
@@ -187,7 +197,8 @@ def _download(release: Release, cancelled: threading.Event) -> Path:
     ):
         raise UpdateError("The installer metadata is invalid.")
     expected_urls = {
-        f"{RELEASES_URL}/download/{tag}/{release.filename}"
+        f"{release_root}/download/{tag}/{release.filename}"
+        for release_root in (RELEASES_URL, LEGACY_RELEASES_URL)
         for tag in (release.version, "v" + release.version)
     }
     if release.download_url not in expected_urls:

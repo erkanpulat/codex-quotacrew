@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from codex_account_manager.gui.locales import LOCALES
+
 ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 UAP = "http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -134,8 +136,8 @@ def create_manifest(
     keys = node(registry, "ExcludedKeys", namespace=VIRTUALIZATION)
     node(keys, "ExcludedKey", "HKEY_CURRENT_USER\\Environment", namespace=VIRTUALIZATION)
     resources = node(package, "Resources")
-    for language in ("en-US", "tr-TR", "pt-BR"):
-        node(resources, "Resource", Language=language)
+    for locale in LOCALES.values():
+        node(resources, "Resource", Language=locale.store_tag)
     dependencies = node(package, "Dependencies")
     node(
         dependencies,

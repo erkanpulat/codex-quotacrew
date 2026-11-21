@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import threading
+import urllib.error
 from dataclasses import replace
 from unittest.mock import Mock
 
@@ -67,6 +68,15 @@ def test_release_versions_are_compared_numerically(remote, current, newer):
     assert bool(updates.parse_release(metadata(remote), current)) == newer
 
 
+def test_release_from_legacy_repository_remains_verifiable():
+    data = metadata()
+    data["html_url"] = f"{updates.LEGACY_RELEASES_URL}/tag/v2.0.0"
+    data["assets"][0]["browser_download_url"] = (
+        f"{updates.LEGACY_RELEASES_URL}/download/v2.0.0/QuotaCrew-Setup-2.0.0.exe"
+    )
+    assert updates.parse_release(data).download_url.startswith(updates.LEGACY_RELEASES_URL)
+
+
 @pytest.mark.parametrize(
     "fault",
     [
@@ -74,7 +84,9 @@ def test_release_versions_are_compared_numerically(remote, current, newer):
         "prerelease",
         "tag",
         "source",
+        "invalid-source-type",
         "url",
+        "mixed-source",
         "digest",
         "missing",
         "duplicate",
@@ -91,8 +103,12 @@ def test_untrusted_or_incomplete_releases_cannot_supply_an_installer(fault):
         data["tag_name"] = "../../2.0.0"
     elif fault == "source":
         data["html_url"] = "https://other.example/release"
+    elif fault == "invalid-source-type":
+        data["html_url"] = []
     elif fault == "url":
         data["assets"][0]["browser_download_url"] = "https://other.example/setup.exe"
+    elif fault == "mixed-source":
+        data["html_url"] = f"{updates.LEGACY_RELEASES_URL}/tag/v2.0.0"
     elif fault == "digest":
         data["assets"][0]["digest"] = "sha256:bad"
     elif fault == "missing":
@@ -137,6 +153,21 @@ def test_latest_check_is_bounded_and_network_errors_are_safe(monkeypatch):
     with pytest.raises(updates.UpdateError) as caught:
         updates.latest_release()
     assert "private" not in str(caught.value)
+
+
+def test_latest_check_falls_back_to_legacy_repository(monkeypatch):
+    opened = Mock(
+        side_effect=[
+            urllib.error.HTTPError(updates.API_URL, 404, "missing", {}, None),
+            io.BytesIO(json.dumps(metadata()).encode()),
+        ]
+    )
+    monkeypatch.setattr(updates, "_open", opened)
+    assert updates.latest_release().version == "2.0.0"
+    assert [call.args for call in opened.call_args_list] == [
+        (updates.API_URL,),
+        (updates.LEGACY_API_URL,),
+    ]
 
 
 @pytest.mark.parametrize("fault", [None, "hash", "truncated", "oversized", "cancelled", "network"])
